@@ -12,7 +12,11 @@ import {
   FileText,
   Plus,
   Settings2,
+  ExternalLink,
+  Loader2,
+  RefreshCw,
   ShieldCheck,
+  Trash2,
   Upload,
   Users,
   Wallet,
@@ -20,6 +24,8 @@ import {
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useDemoData } from '../data/DemoDataContext.jsx'
+import { bookingService } from '../services/bookingService.js'
+import { documentService } from '../services/documentService.js'
 import {
   BarChart,
   Button,
@@ -225,11 +231,13 @@ function Customers() {
 }
 
 function Bookings() {
-  const { bookings, updateRecord } = useDemoData()
+  const { bookings, updateRecord, syncOfflineBookings } = useDemoData()
   const [query, setQuery] = useState('')
   const [tab, setTab] = useState('All')
   const [selected, setSelected] = useState(null)
   const [paymentForm, setPaymentForm] = useState(null)
+  const [isSyncing, setIsSyncing] = useState(false)
+
   const online = bookings.filter((item) => item.type === 'Online').length
   const offline = bookings.filter((item) => item.type === 'Offline').length
   const revenue = bookings.reduce((sum, item) => sum + item.paid, 0)
@@ -241,12 +249,33 @@ function Bookings() {
     return termMatch && tabMatch
   })
 
+  async function handleRefresh() {
+    setIsSyncing(true)
+    try {
+      if (syncOfflineBookings) {
+        await syncOfflineBookings()
+      }
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
   return (
     <div>
       <PageHeader
         title="Bookings"
         description="Track online and in-store rentals, upcoming handovers and payments."
-        action={<Link to="/app/bookings/new"><Button><Plus size={16} />Offline booking</Button></Link>}
+        action={
+          <div className="flex items-center gap-2">
+            <Button variant="quiet" onClick={handleRefresh} disabled={isSyncing}>
+              <RefreshCw size={15} className={isSyncing ? 'animate-spin' : ''} />
+              {isSyncing ? 'Syncing...' : 'Sync backend'}
+            </Button>
+            <Link to="/app/bookings/new">
+              <Button><Plus size={16} />Offline booking</Button>
+            </Link>
+          </div>
+        }
       />
       <div className="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-4">
         <MetricCard label="Total bookings" value={bookings.length} caption="Sample records" icon={ClipboardList} />
@@ -260,30 +289,88 @@ function Bookings() {
         <DataTable
           rows={filtered}
           columns={[
-            { key: 'id', label: 'Booking ID', render: (row) => <button type="button" onClick={() => setSelected(row)} className="font-semibold text-emerald-800 hover:underline">{row.id}</button> },
+            {
+              key: 'id',
+              label: 'Booking ID',
+              render: (row) => (
+                <div className="flex items-center gap-1.5">
+                  <button type="button" onClick={() => setSelected(row)} className="font-semibold text-emerald-800 hover:underline">
+                    {row.id}
+                  </button>
+                  {row.backendSynced && (
+                    <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-600/20">
+                      API
+                    </span>
+                  )}
+                </div>
+              ),
+            },
             { key: 'customer', label: 'Customer', render: (row) => <><span className="font-medium text-slate-800">{row.customer}</span><span className="mt-1 block text-[11px] text-slate-400">{row.vehicle}</span></> },
             { key: 'dates', label: 'Rental dates' },
             { key: 'type', label: 'Type', render: (row) => <span className="text-xs">{row.type}</span> },
             { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status} /> },
             { key: 'paid', label: 'Paid', render: (row) => currency(row.paid) },
             { key: 'pending', label: 'Pending', render: (row) => currency(row.pending) },
-            { key: 'actions', label: '', render: (row) => <div className="flex gap-1"><Button variant="quiet" className="min-h-8 px-2" aria-label={`View ${row.id}`} onClick={() => setSelected(row)}><Eye size={15} /></Button>{row.pending > 0 && <Button variant="quiet" className="min-h-8 px-2" onClick={() => setPaymentForm(row)}>Update payment</Button>}</div> },
+            {
+              key: 'actions',
+              label: '',
+              render: (row) => (
+                <div className="flex gap-1">
+                  <Button variant="quiet" className="min-h-8 px-2" aria-label={`View ${row.id}`} onClick={() => setSelected(row)}>
+                    <Eye size={15} />
+                  </Button>
+                  {row.pending > 0 && (
+                    <Button variant="quiet" className="min-h-8 px-2" onClick={() => setPaymentForm(row)}>
+                      Record payment
+                    </Button>
+                  )}
+                </div>
+              ),
+            },
           ]}
         />
-        <p className="border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400">Demo booking records · {filtered.length} shown</p>
+        <p className="border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400">
+          Showing {filtered.length} bookings · Offline desk & online reservations
+        </p>
       </Card>
-      {selected && <DetailDialog title={`Booking ${selected.id}`} onClose={() => setSelected(null)} record={selected} rows={Object.entries(selected).map(([key, value]) => [key.replace(/([A-Z])/g, ' $1').replace(/^./, (char) => char.toUpperCase()), ['paid', 'pending'].includes(key) ? currency(value) : value])} />}
+      {selected && (
+        <DetailDialog
+          title={`Booking ${selected.id}`}
+          onClose={() => setSelected(null)}
+          record={selected}
+          rows={Object.entries(selected).map(([key, value]) => [
+            key.replace(/([A-Z])/g, ' $1').replace(/^./, (char) => char.toUpperCase()),
+            ['paid', 'pending', 'total_amount', 'base_amount'].includes(key) ? currency(value) : (typeof value === 'object' ? JSON.stringify(value) : value),
+          ])}
+        />
+      )}
       {paymentForm && (
         <RecordForm
           title={`Record payment · ${paymentForm.id}`}
           onClose={() => setPaymentForm(null)}
-          fields={[{ name: 'amount', label: 'Payment amount (₹)', type: 'number', min: 1, required: true }]}
-          onSave={(values) => {
+          fields={[
+            { name: 'amount', label: 'Payment amount (₹)', type: 'number', min: 1, required: true },
+            { name: 'method', label: 'Payment method', type: 'text', placeholder: 'Cash, UPI, or Card' },
+          ]}
+          onSave={async (values) => {
             const amount = Math.min(Number(values.amount), paymentForm.pending)
-            updateRecord('bookings', paymentForm.id, { paid: paymentForm.paid + amount, pending: paymentForm.pending - amount })
+            const method = values.method?.trim() || 'Cash'
+            try {
+              await bookingService.recordPayment(paymentForm.id, {
+                amount,
+                method,
+                notes: `Desk collection via ${method}`,
+              })
+            } catch (err) {
+              console.warn('Backend payment sync fallback to local state:', err)
+            }
+            updateRecord('bookings', paymentForm.id, {
+              paid: paymentForm.paid + amount,
+              pending: paymentForm.pending - amount,
+            })
             setPaymentForm(null)
           }}
-          saveLabel="Record in demo"
+          saveLabel="Record Payment"
         />
       )}
     </div>
@@ -348,39 +435,359 @@ function Payments() {
 }
 
 function Documents() {
-  const { documents, addRecord } = useDemoData()
+  const { documents, addRecord, syncDocuments, vehicles } = useDemoData()
   const [tab, setTab] = useState('Business')
   const [selected, setSelected] = useState(null)
   const [showForm, setShowForm] = useState(false)
-  const [fileName, setFileName] = useState('')
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
+
+  // Upload modal form state
+  const [formName, setFormName] = useState('')
+  const [formCategory, setFormCategory] = useState('Shop License')
+  const [formScope, setFormScope] = useState('Business')
+  const [formVehicleId, setFormVehicleId] = useState('')
+  const [formNotes, setFormNotes] = useState('')
+  const [selectedFile, setSelectedFile] = useState(null)
+
   const filtered = documents.filter((document) => document.scope === tab)
+
+  async function handleRefresh() {
+    setIsSyncing(true)
+    try {
+      if (syncDocuments) {
+        await syncDocuments()
+      }
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
+  async function handleUpload(e) {
+    e.preventDefault()
+    if (!selectedFile) {
+      setUploadError('Please select a file to upload.')
+      return
+    }
+    if (!formName.trim()) {
+      setUploadError('Document name is required.')
+      return
+    }
+
+    setUploadError('')
+    setIsUploading(true)
+
+    try {
+      const selectedVehicle = vehicles?.find((v) => v.id === formVehicleId)
+
+      const formData = new FormData()
+      formData.append('file', selectedFile)
+      formData.append('name', formName.trim())
+      formData.append('category', formCategory)
+      formData.append('scope', formScope)
+      if (formScope === 'Vehicle' && formVehicleId) {
+        formData.append('vehicle_id', formVehicleId)
+        formData.append('vehicle_name', selectedVehicle?.name || '')
+      }
+      if (formNotes.trim()) {
+        formData.append('notes', formNotes.trim())
+      }
+
+      const createdDoc = await documentService.uploadDocument(formData)
+      addRecord('documents', {
+        ...createdDoc,
+        backendSynced: true,
+      })
+
+      // Reset form
+      setShowForm(false)
+      setFormName('')
+      setSelectedFile(null)
+      setFormNotes('')
+      setFormVehicleId('')
+    } catch (err) {
+      console.error('Document upload error:', err)
+      setUploadError(err.message || 'Failed to upload document to Cloudinary.')
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  async function handleDelete(docId) {
+    if (!window.confirm(`Are you sure you want to delete document ${docId}?`)) return
+    try {
+      await documentService.deleteDocument(docId)
+    } catch (err) {
+      console.warn('Backend delete fallback:', err)
+    }
+    // Remove locally from state
+    if (typeof window !== 'undefined') {
+      window.location.reload()
+    }
+  }
 
   return (
     <div>
-      <PageHeader title="Documents" description="Keep business and vehicle paperwork organized in one place." action={<Button onClick={() => setShowForm(true)}><Upload size={16} />Upload document</Button>} />
+      <PageHeader
+        title="Documents"
+        description="Paperwork and certificates uploaded to Cloudinary, with secure URLs saved in database."
+        action={
+          <div className="flex items-center gap-2">
+            <Button variant="quiet" onClick={handleRefresh} disabled={isSyncing}>
+              <RefreshCw size={15} className={isSyncing ? 'animate-spin' : ''} />
+              {isSyncing ? 'Syncing...' : 'Sync backend'}
+            </Button>
+            <Button onClick={() => { setShowForm(true); setUploadError('') }}>
+              <Upload size={16} />Upload document
+            </Button>
+          </div>
+        }
+      />
+
       <div className="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-3">
         <MetricCard label="All documents" value={documents.length} icon={FileText} />
         <MetricCard label="Verified" value={documents.filter((item) => item.status === 'Verified').length} icon={ShieldCheck} tone="green" />
         <MetricCard label="Needs attention" value={documents.filter((item) => item.status !== 'Verified').length} icon={CalendarDays} tone="amber" />
       </div>
+
       <Card className="overflow-hidden">
         <Tabs items={['Business', 'Vehicle']} value={tab} onChange={setTab} />
-        <div className="px-4 py-4 sm:px-5"><div className="rounded-xl border border-amber-200/80 bg-amber-50 px-3.5 py-2.5 text-xs leading-5 text-amber-800">Simulated document records. Files are not uploaded or stored on a server in this demo.</div></div>
-        <DataTable rows={filtered} columns={[
-          { key: 'name', label: 'Document', render: (row) => <span className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-lg bg-emerald-50 text-emerald-700"><FileText size={16} /></span><span className="font-medium text-slate-800">{row.name}<span className="mt-1 block text-[11px] font-normal text-slate-400">{row.id}</span></span></span> },
-          { key: 'category', label: 'Category' }, { key: 'date', label: 'Uploaded' },
-          { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status} /> },
-          { key: 'actions', label: '', render: (row) => <div className="flex gap-1"><Button variant="quiet" className="min-h-8 px-2" onClick={() => setSelected(row)} aria-label={`Preview ${row.name}`}><Eye size={15} />Preview</Button><Button variant="quiet" className="min-h-8 px-2" onClick={() => setSelected(row)} aria-label={`Download ${row.name}`}><Download size={15} /></Button></div> },
-        ]} />
-        <p className="border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400">{filtered.length} simulated {tab.toLowerCase()} documents</p>
+        <div className="px-4 py-3 sm:px-5">
+          <div className="flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3.5 py-2 text-xs leading-5 text-sky-900">
+            <span className="font-semibold text-sky-800">☁️ Cloudinary Storage:</span> Files are uploaded directly to Cloudinary CDN, and the secure URLs and metadata are stored in MongoDB.
+          </div>
+        </div>
+
+        <DataTable
+          rows={filtered}
+          columns={[
+            {
+              key: 'name',
+              label: 'Document',
+              render: (row) => (
+                <span className="flex items-center gap-3">
+                  <span className="grid size-9 place-items-center rounded-lg bg-emerald-50 text-emerald-700">
+                    <FileText size={16} />
+                  </span>
+                  <span className="font-medium text-slate-800">
+                    <span className="flex items-center gap-1.5">
+                      {row.name}
+                      {row.file_url && (
+                        <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 ring-1 ring-sky-600/20">
+                          Cloudinary
+                        </span>
+                      )}
+                    </span>
+                    <span className="mt-1 block text-[11px] font-normal text-slate-400">
+                      {row.id} {row.vehicle_name ? `· ${row.vehicle_name}` : ''}
+                    </span>
+                  </span>
+                </span>
+              ),
+            },
+            { key: 'category', label: 'Category' },
+            { key: 'date', label: 'Uploaded' },
+            { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status} /> },
+            {
+              key: 'actions',
+              label: '',
+              render: (row) => (
+                <div className="flex items-center gap-1">
+                  {row.file_url ? (
+                    <a
+                      href={row.file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-emerald-800"
+                    >
+                      <ExternalLink size={13} />
+                      Preview
+                    </a>
+                  ) : (
+                    <Button variant="quiet" className="min-h-8 px-2" onClick={() => setSelected(row)}>
+                      <Eye size={15} />
+                    </Button>
+                  )}
+
+                  {row.file_url && (
+                    <a
+                      href={row.file_url}
+                      download
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                      title="Download document"
+                    >
+                      <Download size={14} />
+                    </a>
+                  )}
+
+                  <Button variant="quiet" className="min-h-8 px-2 text-rose-600 hover:text-rose-700" onClick={() => handleDelete(row.id)} title="Delete document">
+                    <Trash2 size={14} />
+                  </Button>
+                </div>
+              ),
+            },
+          ]}
+        />
+        <p className="border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400">
+          {filtered.length} {tab.toLowerCase()} documents stored
+        </p>
       </Card>
-      {showForm && <RecordForm title="Add a demo document" onClose={() => { setShowForm(false); setFileName('') }} fields={[
-        { name: 'name', label: 'Document name', required: true },
-        { name: 'category', label: 'Category', type: 'select', options: ['Shop License', 'GST Certificate', 'Insurance', 'PAN Card', 'RC Book', 'PUC', 'Permit'], required: true },
-        { name: 'scope', label: 'Document type', type: 'select', options: [{ label: 'Business document', value: 'Business' }, { label: 'Vehicle document', value: 'Vehicle' }], required: true },
-        { name: 'file', label: 'Choose a local file', type: 'file', wide: true },
-      ]} onSave={(values) => { addRecord('documents', { ...values, file: values.file, id: nextId('DC', documents), date: new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }), status: 'In review' }); setShowForm(false); setFileName('') }} saveLabel="Add to demo" />}
-      {selected && <DetailDialog title={selected.name} record={selected} onClose={() => setSelected(null)} rows={Object.entries(selected)} />}
+
+      {/* Cloudinary Upload Document Modal */}
+      {showForm && (
+        <Modal
+          title="Upload Document to Cloudinary"
+          onClose={() => { if (!isUploading) setShowForm(false) }}
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setShowForm(false)} disabled={isUploading}>
+                Cancel
+              </Button>
+              <Button type="submit" form="upload-doc-form" disabled={isUploading}>
+                {isUploading ? (
+                  <>
+                    <Loader2 size={15} className="animate-spin" />
+                    Uploading to Cloudinary...
+                  </>
+                ) : (
+                  <>
+                    <Upload size={15} />
+                    Upload & Save
+                  </>
+                )}
+              </Button>
+            </div>
+          }
+        >
+          <form id="upload-doc-form" onSubmit={handleUpload} className="space-y-4">
+            {uploadError && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+                {uploadError}
+              </div>
+            )}
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                Document Name <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
+                placeholder="e.g. Shop License, Vehicle Insurance, Owner PAN"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 placeholder:text-slate-400"
+              />
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                  Category <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={formCategory}
+                  onChange={(e) => setFormCategory(e.target.value)}
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                >
+                  <option value="Shop License">Shop License</option>
+                  <option value="GST Certificate">GST Certificate</option>
+                  <option value="Insurance">Insurance Policy</option>
+                  <option value="PAN Card">PAN Card</option>
+                  <option value="RC Book">RC Book</option>
+                  <option value="PUC">PUC Certificate</option>
+                  <option value="Permit">Transport Permit</option>
+                  <option value="Other">Other Document</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                  Document Scope <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={formScope}
+                  onChange={(e) => setFormScope(e.target.value)}
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                >
+                  <option value="Business">Business Document</option>
+                  <option value="Vehicle">Vehicle Document</option>
+                </select>
+              </div>
+            </div>
+
+            {formScope === 'Vehicle' && (
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                  Select Associated Vehicle
+                </label>
+                <select
+                  value={formVehicleId}
+                  onChange={(e) => setFormVehicleId(e.target.value)}
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                >
+                  <option value="">Select a vehicle (optional)</option>
+                  {vehicles?.map((vehicle) => (
+                    <option key={vehicle.id} value={vehicle.id}>
+                      {vehicle.name} ({vehicle.registration || vehicle.id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                Choose Document File (PDF, PNG, JPG) <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="file"
+                required
+                accept=".pdf,.png,.jpg,.jpeg,.webp"
+                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                className="block w-full text-xs text-slate-500 file:mr-3 file:rounded-xl file:border-0 file:bg-emerald-50 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-emerald-700 hover:file:bg-emerald-100"
+              />
+              {selectedFile && (
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Selected: <span className="font-medium text-slate-700">{selectedFile.name}</span> ({(selectedFile.size / 1024).toFixed(1)} KB)
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                Remarks / Notes (optional)
+              </label>
+              <input
+                type="text"
+                value={formNotes}
+                onChange={(e) => setFormNotes(e.target.value)}
+                placeholder="e.g. Valid until Dec 2026, uploaded for verification"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 placeholder:text-slate-400"
+              />
+            </div>
+
+            <div className="rounded-xl bg-sky-50 p-3 text-[11px] leading-5 text-sky-800">
+              ⚡ File is uploaded directly to your Cloudinary cloud (<span className="font-mono">himuiwgh</span>). The secure CDN link is then saved in MongoDB.
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {selected && (
+        <DetailDialog
+          title={selected.name}
+          record={selected}
+          onClose={() => setSelected(null)}
+          rows={Object.entries(selected).map(([key, value]) => [
+            key.replace(/([A-Z])/g, ' $1').replace(/^./, (char) => char.toUpperCase()),
+            typeof value === 'object' ? JSON.stringify(value) : String(value || '—'),
+          ])}
+        />
+      )}
     </div>
   )
 }

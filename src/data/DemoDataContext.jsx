@@ -1,4 +1,6 @@
-import { createContext, useContext, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
+import { bookingService } from '../services/bookingService.js'
+import { documentService } from '../services/documentService.js'
 
 const DemoDataContext = createContext(null)
 
@@ -71,6 +73,94 @@ const seed = {
 export function DemoDataProvider({ children }) {
   const [data, setData] = useState(seed)
 
+  async function syncOfflineBookings() {
+    try {
+      const backendBookings = await bookingService.listOfflineBookings()
+      if (Array.isArray(backendBookings) && backendBookings.length > 0) {
+        setData((current) => {
+          const backendMap = new Map()
+          backendBookings.forEach((b) => {
+            backendMap.set(b.id, {
+              id: b.id,
+              customer: b.customer,
+              vehicle: b.vehicle,
+              dates: b.dates,
+              type: b.type || 'Offline',
+              status: b.status || 'Active',
+              paid: b.paid,
+              pending: b.pending,
+              base_amount: b.base_amount,
+              add_on_amount: b.add_on_amount,
+              service_fee: b.service_fee,
+              discount_amount: b.discount_amount,
+              deposit_amount: b.deposit_amount,
+              total_amount: b.total_amount,
+              rental_days: b.rental_days,
+              vehicle_details: b.vehicle_details,
+              customer_details: b.customer_details,
+              rental_details: b.rental_details,
+              payment_details: b.payment_details,
+              notes: b.notes,
+              backendSynced: true,
+            })
+          })
+
+          const merged = current.bookings.map((item) => backendMap.get(item.id) || item)
+          const currentIds = new Set(current.bookings.map((b) => b.id))
+          const newBackendItems = []
+          backendMap.forEach((item, id) => {
+            if (!currentIds.has(id)) {
+              newBackendItems.push(item)
+            }
+          })
+
+          return {
+            ...current,
+            bookings: [...newBackendItems, ...merged],
+          }
+        })
+      }
+    } catch {
+      // Backend offline or unreachable, keep current demo data
+    }
+  }
+
+  async function syncDocuments() {
+    try {
+      const backendDocs = await documentService.listDocuments()
+      if (Array.isArray(backendDocs) && backendDocs.length > 0) {
+        setData((current) => {
+          const docMap = new Map()
+          backendDocs.forEach((d) => {
+            docMap.set(d.id, {
+              ...d,
+              backendSynced: true,
+            })
+          })
+          const merged = current.documents.map((item) => docMap.get(item.id) || item)
+          const currentIds = new Set(current.documents.map((d) => d.id))
+          const newBackendDocs = []
+          docMap.forEach((item, id) => {
+            if (!currentIds.has(id)) {
+              newBackendDocs.push(item)
+            }
+          })
+          return {
+            ...current,
+            documents: [...newBackendDocs, ...merged],
+          }
+        })
+      }
+    } catch {
+      // Backend offline or unreachable, keep current demo data
+    }
+  }
+
+  useEffect(() => {
+    syncOfflineBookings()
+    syncDocuments()
+  }, [])
+
   function addRecord(collection, record) {
     setData((current) => ({
       ...current,
@@ -88,7 +178,7 @@ export function DemoDataProvider({ children }) {
   }
 
   return (
-    <DemoDataContext.Provider value={{ ...data, addRecord, updateRecord }}>
+    <DemoDataContext.Provider value={{ ...data, addRecord, updateRecord, syncOfflineBookings, syncDocuments }}>
       {children}
     </DemoDataContext.Provider>
   )
