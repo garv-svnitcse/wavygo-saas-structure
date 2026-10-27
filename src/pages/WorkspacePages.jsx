@@ -46,6 +46,7 @@ const currency = (amount) =>
   `₹${Number(amount || 0).toLocaleString('en-IN')}`
 
 function nextId(prefix, records) {
+  // Continue the largest existing numeric suffix so inserted demo rows receive unique IDs.
   const max = records.reduce((largest, record) => {
     const number = Number(record.id?.match(/\d+$/)?.[0] || 0)
     return Math.max(largest, number)
@@ -60,6 +61,7 @@ function RecordForm({ title, fields, onClose, onSave, saveLabel = 'Save to demo'
 
   function submit(event) {
     event.preventDefault()
+    // Form configuration drives required-field checks consistently across the demo screens.
     const missing = fields.find(
       (field) => field.required && !String(values[field.name] || '').trim(),
     )
@@ -244,6 +246,7 @@ function Bookings() {
   const pending = bookings.reduce((sum, item) => sum + item.pending, 0)
   const tabs = ['All', 'Online', 'Offline', 'Active', 'Completed', 'Cancelled']
   const filtered = bookings.filter((booking) => {
+    // The shared tab control intentionally matches either booking channel or booking status.
     const termMatch = `${booking.id} ${booking.customer} ${booking.vehicle}`.toLowerCase().includes(query.toLowerCase())
     const tabMatch = tab === 'All' || booking.type === tab || booking.status === tab
     return termMatch && tabMatch
@@ -353,6 +356,7 @@ function Bookings() {
             { name: 'method', label: 'Payment method', type: 'text', placeholder: 'Cash, UPI, or Card' },
           ]}
           onSave={async (values) => {
+            // A partial-payment entry cannot exceed the booking's remaining balance.
             const amount = Math.min(Number(values.amount), paymentForm.pending)
             const method = values.method?.trim() || 'Cash'
             try {
@@ -898,6 +902,7 @@ function Reports() {
   function exportCsv() {
     const csvRows = [['Booking ID', 'Customer', 'Vehicle', 'Rental dates', 'Type', 'Status', 'Paid', 'Pending']]
     bookings.forEach((row) => csvRows.push([row.id, row.customer, row.vehicle, row.dates, row.type, row.status, row.paid, row.pending]))
+    // Quote every cell and double embedded quotes to produce valid CSV for arbitrary field text.
     const content = csvRows.map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(',')).join('\r\n')
     const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }))
     const link = document.createElement('a')
@@ -971,6 +976,7 @@ const defaultSettings = {
 function Settings() {
   const [section, setSection] = useState(settingSections[0].label)
   const [settings, setSettings] = useState(() => {
+    // Settings persist in this browser only; they are not synchronized with a backend.
     const stored = window.localStorage.getItem('wavygo-demo-settings')
     return stored ? { ...defaultSettings, ...JSON.parse(stored) } : defaultSettings
   })

@@ -1,9 +1,14 @@
 from typing import Optional
+import logging
 import time
-from pymongo import MongoClient
+
+from pymongo import ASCENDING, MongoClient
 from pymongo.database import Database
+from pymongo.errors import DuplicateKeyError, OperationFailure, PyMongoError
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 _mongo_client: Optional[MongoClient] = None
 _last_check_time: float = 0.0
@@ -33,7 +38,6 @@ def create_mongo_client() -> Optional[MongoClient]:
             serverSelectionTimeoutMS=1000,
             connectTimeoutMS=1000,
         )
-        # Test ping to verify credentials and IP access
         client.admin.command("ping")
         _mongo_client = client
         _is_connected = True
@@ -64,3 +68,36 @@ def get_database(client: Optional[MongoClient] = None) -> Optional[Database]:
         return client[settings.mongodb_database]
     except Exception:
         return None
+
+
+def ensure_vehicle_indexes() -> None:
+    """
+    Create required indexes on the vehicles collection.
+
+    Called once at application startup. Idempotent.
+    """
+    db = get_database()
+    if db is None:
+        logger.warning(
+            "MongoDB not configured — skipping vehicle index creation. "
+            "Set MONGODB_URI in your environment."
+        )
+        return
+
+    collection = db["vehicles"]
+    index_name = "uq_registration_number"
+    try:
+        collection.create_index(
+            [("registrationNumber", ASCENDING)],
+            unique=True,
+            sparse=True,
+            name=index_name,
+        )
+        logger.info("Vehicle index '%s' is ready.", index_name)
+    except (DuplicateKeyError, OperationFailure, PyMongoError) as exc:
+        logger.error(
+            "Could not create vehicle index '%s'. "
+            "Error: %s",
+            index_name,
+            exc,
+        )

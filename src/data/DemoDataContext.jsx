@@ -60,6 +60,7 @@ const initialStaff = [
   { id: 'ST-021', name: 'Nikhil Rao', role: 'Delivery associate', phone: '+91 98204 56789', salary: 19500, attendance: '—', nextSalary: '—', status: 'Inactive' },
 ]
 
+// All screens share this in-memory sample dataset; updates last only for the current app session.
 const seed = {
   vehicles: initialVehicles,
   customers: initialCustomers,
@@ -162,6 +163,7 @@ export function DemoDataProvider({ children }) {
   }, [])
 
   function addRecord(collection, record) {
+    // Keep the selected collection immutable so every consumer sees the updated context value.
     setData((current) => ({
       ...current,
       [collection]: [record, ...current[collection]],
@@ -186,6 +188,7 @@ export function DemoDataProvider({ children }) {
 
 export function useDemoData() {
   const context = useContext(DemoDataContext)
+  // Fail at the hook boundary instead of letting consumers render with missing demo data.
   if (!context) {
     throw new Error('useDemoData must be used within DemoDataProvider.')
   }
