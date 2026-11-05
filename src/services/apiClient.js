@@ -1,4 +1,8 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8001/api/v1'
+const API_BASE_URL =
+  import.meta.env.API_URL ||
+  import.meta.env.VITE_API_URL ||
+  import.meta.env.VITE_API_BASE_URL ||
+  'http://127.0.0.1:8001/api/v1'
 
 /**
  * Universal API request wrapper
