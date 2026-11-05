@@ -17,6 +17,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.mongo_client = mongo_client
     app.state.database = get_database(mongo_client) if mongo_client is not None else None
     try:
+        ensure_vehicle_indexes()
+    except Exception:
+        pass
+    try:
         yield
     finally:
         if mongo_client is not None:
@@ -32,12 +36,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-def on_startup() -> None:
-    """Run one-time startup tasks (indexes, etc.)."""
-    ensure_vehicle_indexes()
 
 
 @app.get("/health")

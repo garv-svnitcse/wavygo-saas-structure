@@ -16,46 +16,56 @@ _is_connected: bool = False
 
 
 def create_mongo_client() -> Optional[MongoClient]:
-    """Create a client and check connectivity with short timeout."""
+    """Create a client or return existing connected client pool."""
     global _mongo_client, _last_check_time, _is_connected
 
     uri = settings.effective_mongo_uri
     if not uri:
         return None
 
+    # Return cached client if connected
+    if _is_connected and _mongo_client is not None:
+        return _mongo_client
+
     now = time.time()
-    # If connection previously failed, only recheck every 30 seconds
-    if not _is_connected and (now - _last_check_time) < 30.0 and _mongo_client is not None:
+    # If connection previously failed, throttle for 10 seconds before retrying
+    if not _is_connected and (now - _last_check_time) < 10.0:
         return None
 
     _last_check_time = now
 
     try:
         import certifi
-        client = MongoClient(
-            uri,
-            tlsCAFile=certifi.where(),
-            serverSelectionTimeoutMS=1000,
-            connectTimeoutMS=1000,
-        )
+        client_kwargs = {
+            "serverSelectionTimeoutMS": 2000,
+            "connectTimeoutMS": 2000,
+        }
+        if "mongodb+srv://" in uri or "ssl=true" in uri.lower() or "tls=true" in uri.lower():
+            client_kwargs["tlsCAFile"] = certifi.where()
+            client_kwargs["tlsAllowInvalidCertificates"] = True
+        client = MongoClient(uri, **client_kwargs)
         client.admin.command("ping")
         _mongo_client = client
         _is_connected = True
         return _mongo_client
-    except Exception:
-        try:
-            client = MongoClient(
-                uri,
-                serverSelectionTimeoutMS=1000,
-                connectTimeoutMS=1000,
-            )
-            client.admin.command("ping")
-            _mongo_client = client
-            _is_connected = True
-            return _mongo_client
-        except Exception:
-            _is_connected = False
-            return None
+    except Exception as exc:
+        logger.warning("MongoDB primary connect failed: %s", exc)
+        if "mongodb+srv://" in uri:
+            try:
+                client = MongoClient(
+                    uri,
+                    serverSelectionTimeoutMS=2000,
+                    connectTimeoutMS=2000,
+                )
+                client.admin.command("ping")
+                _mongo_client = client
+                _is_connected = True
+                return _mongo_client
+            except Exception as exc2:
+                logger.warning("MongoDB fallback ping failed: %s", exc2)
+        _is_connected = False
+        _mongo_client = None
+        return None
 
 
 def get_database(client: Optional[MongoClient] = None) -> Optional[Database]:
@@ -63,7 +73,7 @@ def get_database(client: Optional[MongoClient] = None) -> Optional[Database]:
     try:
         if client is None:
             client = create_mongo_client()
-        if client is None or not _is_connected:
+        if client is None:
             return None
         return client[settings.mongodb_database]
     except Exception:
@@ -84,20 +94,32 @@ def ensure_vehicle_indexes() -> None:
         )
         return
 
-    collection = db["vehicles"]
-    index_name = "uq_registration_number"
     try:
-        collection.create_index(
-            [("registrationNumber", ASCENDING)],
+        vehicles_col = db["vehicles"]
+        # Unique sparse index on registrationNumber: prevents duplicate
+        # registrations per-tenant. Sparse so vehicles without a registration
+        # (legacy drafts) do not conflict.
+        vehicles_col.create_index(
+            [("tenant_id", ASCENDING), ("registrationNumber", ASCENDING)],
             unique=True,
             sparse=True,
-            name=index_name,
+            name="uq_tenant_registration",
         )
-        logger.info("Vehicle index '%s' is ready.", index_name)
-    except (DuplicateKeyError, OperationFailure, PyMongoError) as exc:
-        logger.error(
-            "Could not create vehicle index '%s'. "
-            "Error: %s",
-            index_name,
-            exc,
+        # Search index on name, registration, color
+        vehicles_col.create_index(
+            [("name", ASCENDING), ("registration", ASCENDING)],
+            name="ix_vehicle_search",
         )
+        # Filter indexes
+        vehicles_col.create_index([("type", ASCENDING)], name="ix_vehicle_type")
+        vehicles_col.create_index([("fuel", ASCENDING)], name="ix_vehicle_fuel")
+        vehicles_col.create_index(
+            [("fleetAvailability", ASCENDING)], name="ix_vehicle_availability"
+        )
+        vehicles_col.create_index(
+            [("showOnWavygo", ASCENDING)], name="ix_vehicle_show_on_wavygo"
+        )
+    except (DuplicateKeyError, OperationFailure) as exc:
+        logger.warning("Vehicle index creation warning: %s", exc)
+    except PyMongoError as exc:
+        logger.error("Failed to ensure vehicle indexes: %s", exc)

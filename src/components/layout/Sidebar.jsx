@@ -1,6 +1,7 @@
 import {
   Activity,
   BarChart3,
+  Bell,
   Bike,
   CalendarDays,
   ChevronLeft,
@@ -13,6 +14,7 @@ import {
   X,
 } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
+import { useDemoData } from '../../data/DemoDataContext.jsx'
 
 const links = [
   { label: 'Dashboard', to: '/app/dashboard', icon: LayoutDashboard },
@@ -22,12 +24,14 @@ const links = [
   { label: 'Payments', to: '/app/payments', icon: Wallet },
   { label: 'Documents', to: '/app/documents', icon: FileText },
   { label: 'Maintenance', to: '/app/maintenance', icon: Activity },
+  { label: 'Notifications', to: '/app/notifications', icon: Bell, badge: true },
   { label: 'Staff', to: '/app/staff', icon: Users },
   { label: 'Reports', to: '/app/reports', icon: BarChart3 },
   { label: 'Settings', to: '/app/settings', icon: Settings },
 ]
 
 function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onCloseMobile }) {
+  const { unreadNotificationsCount = 0 } = useDemoData()
   return (
     <>
       {mobileOpen && (
@@ -74,7 +78,7 @@ function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onCloseMobile }) {
 
         <nav aria-label="Main navigation" className="mt-5 flex-1 space-y-1 overflow-y-auto px-2.5 pb-4">
           {!collapsed && <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-100/45">Manage</p>}
-          {links.map(({ label, to, icon: Icon }) => (
+          {links.map(({ label, to, icon: Icon, badge }) => (
             <NavLink
               key={to}
               to={to}
@@ -82,15 +86,29 @@ function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onCloseMobile }) {
               onClick={onCloseMobile}
               title={collapsed ? label : undefined}
               className={({ isActive }) =>
-                `group flex min-h-10 items-center gap-3 rounded-xl px-3 text-[13px] font-medium transition ${collapsed ? 'justify-center px-0' : ''} ${
+                `group relative flex min-h-10 items-center gap-3 rounded-xl px-3 text-[13px] font-medium transition ${collapsed ? 'justify-center px-0' : ''} ${
                   isActive
                     ? 'bg-[#D8F4E7] text-[#123B2D] shadow-[0_4px_14px_rgba(0,0,0,0.12)]'
                     : 'text-emerald-50/70 hover:bg-white/[0.085] hover:text-white'
                 }`
               }
             >
-              <Icon size={18} strokeWidth={1.8} aria-hidden="true" className="shrink-0" />
-              {!collapsed && <span>{label}</span>}
+              <div className="relative shrink-0">
+                <Icon size={18} strokeWidth={1.8} aria-hidden="true" />
+                {badge && unreadNotificationsCount > 0 && collapsed && (
+                  <span className="absolute -top-1 -right-1 size-2 rounded-full bg-rose-500 ring-2 ring-[#102C25]" />
+                )}
+              </div>
+              {!collapsed && (
+                <div className="flex flex-1 items-center justify-between">
+                  <span>{label}</span>
+                  {badge && unreadNotificationsCount > 0 && (
+                    <span className="rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold text-white leading-none">
+                      {unreadNotificationsCount}
+                    </span>
+                  )}
+                </div>
+              )}
             </NavLink>
           ))}
         </nav>

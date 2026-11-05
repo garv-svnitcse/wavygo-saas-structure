@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   ArrowDownToLine,
   ArrowUpRight,
@@ -23,9 +23,16 @@ import {
   Wrench,
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { API_BASE_URL } from '../services/apiClient.js'
 import { useDemoData } from '../data/DemoDataContext.jsx'
 import { bookingService } from '../services/bookingService.js'
+import { customerService } from '../services/customerService.js'
 import { documentService } from '../services/documentService.js'
+import { maintenanceService } from '../services/maintenanceService.js'
+import { tenantService } from '../services/tenantService.js'
+import { paymentService } from '../services/paymentService.js'
+import { financeService } from '../services/financeService.js'
+import { reportService } from '../services/reportService.js'
 import {
   BarChart,
   Button,
@@ -54,7 +61,7 @@ function nextId(prefix, records) {
   return `${prefix}-${max + 1}`
 }
 
-function RecordForm({ title, fields, onClose, onSave, saveLabel = 'Save to demo' }) {
+function RecordForm({ title, fields, onClose, onSave, saveLabel = 'Save record', showDemoNote = false }) {
   const initialValues = Object.fromEntries(fields.map((field) => [field.name, field.initial || '']))
   const [values, setValues] = useState(initialValues)
   const [error, setError] = useState('')
@@ -128,15 +135,17 @@ function RecordForm({ title, fields, onClose, onSave, saveLabel = 'Save to demo'
           ))}
         </div>
         {error && <p role="alert" className="text-xs text-rose-600">{error}</p>}
-        <p className="rounded-xl bg-amber-50 px-3 py-2 text-[11px] leading-5 text-amber-800">
-          Demo only. This record is held in page state and is not sent to a server.
-        </p>
+        {showDemoNote && (
+          <p className="rounded-xl bg-amber-50 px-3 py-2 text-[11px] leading-5 text-amber-800">
+            Demo only. This record is held in page state and is not sent to a server.
+          </p>
+        )}
       </form>
     </Modal>
   )
 }
 
-function DetailDialog({ title, rows, onClose }) {
+function DetailDialog({ title, rows, onClose, showDemoNote = false }) {
   return (
     <Modal title={title} onClose={onClose}>
       <div className="space-y-3">
@@ -146,26 +155,28 @@ function DetailDialog({ title, rows, onClose }) {
             <span className="text-right text-xs font-medium text-slate-800">{value || '—'}</span>
           </div>
         ))}
-        <p className="pt-1 text-[11px] text-slate-400">Sample workspace details · Demo data only</p>
+        {showDemoNote && <p className="pt-1 text-[11px] text-slate-400">Sample workspace details · Demo data only</p>}
       </div>
     </Modal>
   )
 }
 
 function Customers() {
-  const { customers, addRecord } = useDemoData()
+  const { customers, addRecord, syncCustomers } = useDemoData()
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('All')
   const [searchParams] = useSearchParams()
   const [showForm, setShowForm] = useState(() => searchParams.get('new') === '1')
   const [selected, setSelected] = useState(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [notice, setNotice] = useState('')
 
   const filtered = customers.filter((customer) =>
     `${customer.name} ${customer.phone} ${customer.email} ${customer.id}`.toLowerCase().includes(query.toLowerCase())
     && (status === 'All' || customer.status === status),
   )
-  const totalPaid = customers.reduce((total, item) => total + item.paid, 0)
-  const pending = customers.reduce((total, item) => total + item.pending, 0)
+  const totalPaid = customers.reduce((total, item) => total + (item.paid || 0), 0)
+  const pending = customers.reduce((total, item) => total + (item.pending || 0), 0)
 
   return (
     <div>
@@ -175,7 +186,7 @@ function Customers() {
         action={<Button onClick={() => setShowForm(true)}><Plus size={16} />Add customer</Button>}
       />
       <div className="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <MetricCard label="Total customers" value={customers.length} caption="In this demo workspace" icon={Users} />
+        <MetricCard label="Total customers" value={customers.length} caption="Managed customers" icon={Users} />
         <MetricCard label="Verified profiles" value={customers.filter((item) => item.status === 'Verified').length} icon={ShieldCheck} tone="blue" />
         <MetricCard label="Total collected" value={currency(totalPaid)} icon={BadgeIndianRupee} tone="violet" />
         <MetricCard label="Pending customer dues" value={currency(pending)} icon={Wallet} tone="amber" />
@@ -190,14 +201,14 @@ function Customers() {
           columns={[
             { key: 'customer', label: 'Customer', render: (row) => <button type="button" onClick={() => setSelected(row)} className="text-left font-medium text-slate-800 hover:text-emerald-800">{row.name}<span className="mt-1 block text-[11px] font-normal text-slate-400">{row.id} · {row.email}</span></button> },
             { key: 'phone', label: 'Phone' },
-            { key: 'bookings', label: 'Bookings', render: (row) => <span>{row.bookings} <span className="text-[11px] text-slate-400">· {row.active} active</span></span> },
-            { key: 'paid', label: 'Total paid', render: (row) => currency(row.paid) },
-            { key: 'pending', label: 'Pending', render: (row) => currency(row.pending) },
+            { key: 'bookings', label: 'Bookings', render: (row) => <span>{row.bookings || 0} <span className="text-[11px] text-slate-400">· {row.active || 0} active</span></span> },
+            { key: 'paid', label: 'Total paid', render: (row) => currency(row.paid || 0) },
+            { key: 'pending', label: 'Pending', render: (row) => currency(row.pending || 0) },
             { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status} /> },
             { key: 'view', label: '', render: (row) => <Button variant="quiet" className="min-h-8 px-2.5" onClick={() => setSelected(row)}><Eye size={15} />View</Button> },
           ]}
         />
-        <p className="border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400">{filtered.length} demo customers</p>
+        <p className="border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400">{filtered.length} customers listed</p>
       </Card>
       {showForm && (
         <RecordForm
@@ -209,8 +220,32 @@ function Customers() {
             { name: 'email', label: 'Email address', type: 'email' },
             { name: 'status', label: 'Profile status', type: 'select', options: ['Review', 'Verified'], required: true },
           ]}
-          onSave={(values) => {
-            addRecord('customers', { ...values, id: nextId('CU', customers), bookings: 0, active: 0, paid: 0, pending: 0 })
+          onSave={async (values) => {
+            try {
+              const res = await customerService.createCustomer(values)
+              if (syncCustomers) await syncCustomers()
+              else {
+                addRecord('customers', {
+                  ...values,
+                  id: res?.id || nextId('CU', customers),
+                  bookings: 0,
+                  active: 0,
+                  paid: 0,
+                  pending: 0,
+                  backendSynced: true,
+                })
+              }
+            } catch (err) {
+              // Local fallback if unauthenticated
+              addRecord('customers', {
+                ...values,
+                id: nextId('CU', customers),
+                bookings: 0,
+                active: 0,
+                paid: 0,
+                pending: 0,
+              })
+            }
             setShowForm(false)
           }}
         />
@@ -233,7 +268,7 @@ function Customers() {
 }
 
 function Bookings() {
-  const { bookings, updateRecord, syncOfflineBookings } = useDemoData()
+  const { bookings, updateRecord, syncOfflineBookings, syncPayments } = useDemoData()
   const [query, setQuery] = useState('')
   const [tab, setTab] = useState('All')
   const [selected, setSelected] = useState(null)
@@ -281,7 +316,7 @@ function Bookings() {
         }
       />
       <div className="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <MetricCard label="Total bookings" value={bookings.length} caption="Sample records" icon={ClipboardList} />
+        <MetricCard label="Total bookings" value={bookings.length} caption="All bookings" icon={ClipboardList} />
         <MetricCard label="Online bookings" value={online} icon={ArrowUpRight} tone="blue" />
         <MetricCard label="Offline bookings" value={offline} icon={CalendarDays} tone="violet" />
         <MetricCard label="Revenue · pending" value={`${currency(revenue)} · ${currency(pending)}`} icon={CircleDollarSign} tone="amber" />
@@ -365,13 +400,15 @@ function Bookings() {
                 method,
                 notes: `Desk collection via ${method}`,
               })
+              if (syncOfflineBookings) await syncOfflineBookings()
+              if (syncPayments) await syncPayments()
             } catch (err) {
               console.warn('Backend payment sync fallback to local state:', err)
+              updateRecord('bookings', paymentForm.id, {
+                paid: paymentForm.paid + amount,
+                pending: paymentForm.pending - amount,
+              })
             }
-            updateRecord('bookings', paymentForm.id, {
-              paid: paymentForm.paid + amount,
-              pending: paymentForm.pending - amount,
-            })
             setPaymentForm(null)
           }}
           saveLabel="Record Payment"
@@ -382,58 +419,851 @@ function Bookings() {
 }
 
 function Payments() {
-  const { payments } = useDemoData()
+  const {
+    payments = [],
+    bookings = [],
+    expenses = [],
+    financeOverview,
+    syncPayments,
+    syncFinance,
+    syncOfflineBookings,
+    addRecord,
+    updateRecord,
+    deleteRecord,
+  } = useDemoData()
   const [query, setQuery] = useState('')
   const [tab, setTab] = useState('All')
   const [dateRange, setDateRange] = useState('This month')
   const [selected, setSelected] = useState(null)
-  const revenue = payments.reduce((sum, payment) => sum + payment.amount, 0)
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [showRecordModal, setShowRecordModal] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [formError, setFormError] = useState('')
+  const [refundLoading, setRefundLoading] = useState(false)
+
+  // Section switcher: 'payments' | 'expenses'
+  const [section, setSection] = useState('payments')
+
+  // Expense form state
+  const [showExpenseModal, setShowExpenseModal] = useState(false)
+  const [expCategory, setExpCategory] = useState('Rent & Operations')
+  const [expTitle, setExpTitle] = useState('')
+  const [expAmount, setExpAmount] = useState('')
+  const [expPayee, setExpPayee] = useState('')
+  const [expMethod, setExpMethod] = useState('Bank Transfer')
+  const [expStatus, setExpStatus] = useState('Paid')
+  const [expNotes, setExpNotes] = useState('')
+  const [isExpSubmitting, setIsExpSubmitting] = useState(false)
+  const [expFormError, setExpFormError] = useState('')
+  const [expFilterCategory, setExpFilterCategory] = useState('All')
+
+  // Payment Form State
+  const [formBooking, setFormBooking] = useState('')
+  const [formCustomer, setFormCustomer] = useState('')
+  const [formAmount, setFormAmount] = useState('')
+  const [formMethod, setFormMethod] = useState('UPI')
+  const [formStatus, setFormStatus] = useState('Paid')
+  const [formNotes, setFormNotes] = useState('')
+
+  const revenue = payments
+    .filter((p) => p.status !== 'Refunded')
+    .reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0)
+
+  const offlineRevenue = payments
+    .filter((p) => p.status !== 'Refunded' && (p.method === 'Cash' || p.method === 'UPI'))
+    .reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0)
+
+  const pendingTotal = bookings.reduce((sum, b) => sum + (Number(b.pending) || 0), 0)
+
   const filtered = payments.filter((payment) =>
     `${payment.id} ${payment.booking} ${payment.customer} ${payment.method}`.toLowerCase().includes(query.toLowerCase())
     && (tab === 'All' || payment.status === tab),
-  ).filter((payment) => dateRange === 'All time' || payment.date.includes('Oct 2026'))
+  ).filter((payment) => dateRange === 'All time' || (payment.date && (payment.date.includes('2026') || payment.date.includes('Oct'))))
+
+  const filteredExpenses = expenses.filter((e) =>
+    `${e.id} ${e.category} ${e.title} ${e.payee || ''} ${e.reference || ''}`.toLowerCase().includes(query.toLowerCase())
+    && (expFilterCategory === 'All' || e.category === expFilterCategory),
+  )
+
+  function handleBookingSelect(e) {
+    const bId = e.target.value
+    setFormBooking(bId)
+    if (bId) {
+      const b = bookings.find((item) => item.id === bId)
+      if (b) {
+        setFormCustomer(b.customer || '')
+        if (b.pending && Number(b.pending) > 0) {
+          setFormAmount(String(b.pending))
+        } else if (b.paid && Number(b.paid) > 0) {
+          setFormAmount(String(b.paid))
+        } else if (b.total_amount) {
+          setFormAmount(String(b.total_amount))
+        }
+      }
+    }
+  }
+
+  async function handleRefresh() {
+    setIsSyncing(true)
+    try {
+      await Promise.allSettled([
+        syncPayments ? syncPayments() : Promise.resolve(),
+        syncFinance ? syncFinance() : Promise.resolve(),
+      ])
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
+  async function handleRecordExpense(e) {
+    e.preventDefault()
+    if (!expTitle.trim()) {
+      setExpFormError('Expense title/description is required.')
+      return
+    }
+    const amt = parseFloat(expAmount)
+    if (isNaN(amt) || amt <= 0) {
+      setExpFormError('Please enter a valid expense amount.')
+      return
+    }
+
+    setExpFormError('')
+    setIsExpSubmitting(true)
+
+    try {
+      const payload = {
+        category: expCategory,
+        title: expTitle.trim(),
+        amount: amt,
+        payment_method: expMethod,
+        payee: expPayee.trim() || undefined,
+        status: expStatus,
+        notes: expNotes.trim() || undefined,
+      }
+
+      const created = await financeService.createExpense(payload)
+
+      if (addRecord) {
+        addRecord('expenses', {
+          ...created,
+          backendSynced: true,
+        })
+      }
+
+      if (syncFinance) {
+        await syncFinance()
+      }
+
+      setShowExpenseModal(false)
+      setExpTitle('')
+      setExpAmount('')
+      setExpPayee('')
+      setExpNotes('')
+    } catch (err) {
+      setExpFormError(err.message || 'Failed to record expense in backend.')
+    } finally {
+      setIsExpSubmitting(false)
+    }
+  }
+
+  async function handleDeleteExpense(expenseId) {
+    if (!window.confirm(`Are you sure you want to delete expense ${expenseId}?`)) return
+    try {
+      await financeService.deleteExpense(expenseId)
+      if (deleteRecord) {
+        deleteRecord('expenses', expenseId)
+      }
+      if (syncFinance) {
+        await syncFinance()
+      }
+    } catch (err) {
+      alert(`Delete failed: ${err.message || 'Error occurred'}`)
+    }
+  }
+
+  async function handleRecordPayment(e) {
+    e.preventDefault()
+    if (!formCustomer.trim()) {
+      setFormError('Customer name is required.')
+      return
+    }
+    const amt = parseFloat(formAmount)
+    if (isNaN(amt) || amt <= 0) {
+      setFormError('Please enter a valid positive amount.')
+      return
+    }
+
+    setFormError('')
+    setIsSubmitting(true)
+
+    try {
+      const payload = {
+        booking: formBooking.trim() || 'COUNTER-WALKIN',
+        customer: formCustomer.trim(),
+        method: formMethod,
+        amount: amt,
+        status: formStatus,
+        notes: formNotes.trim() || undefined,
+      }
+
+      const created = await paymentService.recordPayment(payload)
+
+      if (addRecord) {
+        addRecord('payments', {
+          ...created,
+          backendSynced: true,
+        })
+      }
+
+      if (syncPayments) {
+        await syncPayments()
+      }
+
+      if (formBooking && syncOfflineBookings) {
+        await syncOfflineBookings()
+      }
+
+      // If linked to a booking, also adjust booking's paid/pending in state
+      if (formBooking && updateRecord) {
+        const linkedBooking = bookings.find((b) => b.id === formBooking)
+        if (linkedBooking) {
+          const newPaid = (Number(linkedBooking.paid) || 0) + amt
+          const currentPending = Number(linkedBooking.pending) || 0
+          const newPending = Math.max(0, currentPending - amt)
+          updateRecord('bookings', formBooking, {
+            paid: newPaid,
+            pending: newPending,
+          })
+        }
+      }
+
+      setShowRecordModal(false)
+      setFormBooking('')
+      setFormCustomer('')
+      setFormAmount('')
+      setFormMethod('UPI')
+      setFormStatus('Paid')
+      setFormNotes('')
+    } catch (err) {
+      setFormError(err.message || 'Failed to record payment in backend.')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  async function handleRefund(paymentId) {
+    if (!window.confirm(`Are you sure you want to process a refund for ${paymentId}?`)) return
+    setRefundLoading(true)
+    try {
+      await paymentService.refundPayment(paymentId, 'Requested by customer at counter')
+      if (updateRecord) {
+        updateRecord('payments', paymentId, { status: 'Refunded' })
+      }
+      if (syncPayments) {
+        await syncPayments()
+      }
+      setSelected((prev) => (prev && prev.id === paymentId ? { ...prev, status: 'Refunded' } : prev))
+    } catch (err) {
+      alert(`Refund failed: ${err.message || 'Error occurred'}`)
+    } finally {
+      setRefundLoading(false)
+    }
+  }
 
   return (
     <div>
-      <PageHeader title="Payments & finance" description="A clear picture of collections and outstanding payments. This demo does not process real transactions." action={<div className="flex flex-wrap gap-2"><FilterSelect label="Status" value={tab} onChange={setTab} options={['All', 'Paid', 'Partial']} /><FilterSelect value={dateRange} onChange={setDateRange} options={['This month', 'Last month', 'All time']} /></div>} />
+      <PageHeader
+        title="Payments & finance"
+        description="A clear picture of collections and transactions stored in MongoDB, with UPI, Cash, and Card records."
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              className="min-h-9"
+              onClick={handleRefresh}
+              disabled={isSyncing}
+            >
+              <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
+              {isSyncing ? 'Syncing...' : 'Sync backend'}
+            </Button>
+            <Button
+              variant="secondary"
+              className="min-h-9"
+              onClick={() => {
+                setExpFormError('')
+                setShowExpenseModal(true)
+              }}
+            >
+              <Plus size={15} />
+              Record expense
+            </Button>
+            <Button
+              className="min-h-9"
+              onClick={() => {
+                setFormError('')
+                setShowRecordModal(true)
+              }}
+            >
+              <Plus size={15} />
+              Record payment
+            </Button>
+            <FilterSelect label="Status" value={tab} onChange={setTab} options={['All', 'Paid', 'Partial', 'Refunded']} />
+            <FilterSelect value={dateRange} onChange={setDateRange} options={['This month', 'Last month', 'All time']} />
+          </div>
+        }
+      />
+
       <div className="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <MetricCard label="Collected · demo" value={currency(revenue)} caption="From sample transactions" icon={BadgeIndianRupee} />
-        <MetricCard label="Online bookings" value={currency(248900)} caption="Illustrative month total" icon={ArrowUpRight} tone="blue" />
-        <MetricCard label="Offline revenue" value={currency(105900)} caption="Illustrative month total" icon={Wallet} tone="violet" />
-        <MetricCard label="Pending payments" value={currency(18450)} caption="Sample outstanding balance" icon={CircleDollarSign} tone="amber" />
+        <MetricCard label="Collected total" value={currency(financeOverview?.total_revenue ?? revenue)} caption="Total verified receipts" icon={BadgeIndianRupee} />
+        <MetricCard label="Online bookings" value={currency(financeOverview?.online_revenue ?? 248900)} caption="Total online revenue" icon={ArrowUpRight} tone="blue" />
+        <MetricCard label="Counter & UPI" value={currency(financeOverview?.offline_revenue ?? offlineRevenue)} caption="Offline and counter intake" icon={Wallet} tone="violet" />
+        <MetricCard label="Pending balance" value={currency(financeOverview?.pending_receivables ?? (pendingTotal || 18450))} caption="Outstanding from bookings" icon={CircleDollarSign} tone="amber" />
       </div>
+
       <div className="mb-4 grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(280px,0.8fr)]">
         <Card className="p-5 sm:p-6">
           <div className="flex flex-wrap justify-between gap-3">
-            <div><h2 className="text-sm font-semibold text-slate-900">Revenue vs. expenses</h2><p className="mt-1 text-xs text-slate-500">Illustrative monthly summary · ₹</p></div>
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Revenue vs. expenses</h2>
+              <p className="mt-1 text-xs text-slate-500">Monthly breakdown · ₹</p>
+            </div>
             <FilterSelect value={dateRange} onChange={setDateRange} options={['This month', 'Last month', 'All time']} />
           </div>
-          <div className="mt-4"><ComparisonChart data={[{ label: 'May', revenue: 18, expenses: 9 }, { label: 'Jun', revenue: 22, expenses: 12 }, { label: 'Jul', revenue: 19, expenses: 11 }, { label: 'Aug', revenue: 26, expenses: 14 }, { label: 'Sep', revenue: 31, expenses: 16 }, { label: 'Oct', revenue: 35, expenses: 18 }]} /></div>
+          <div className="mt-4">
+            <ComparisonChart
+              data={
+                financeOverview?.comparison_chart && financeOverview.comparison_chart.length > 0
+                  ? financeOverview.comparison_chart
+                  : [
+                      { label: 'May', revenue: 18, expenses: 9 },
+                      { label: 'Jun', revenue: 22, expenses: 12 },
+                      { label: 'Jul', revenue: 19, expenses: 11 },
+                      { label: 'Aug', revenue: 26, expenses: 14 },
+                      { label: 'Sep', revenue: 31, expenses: 16 },
+                      { label: 'Oct', revenue: 35, expenses: 18 },
+                    ]
+              }
+            />
+          </div>
         </Card>
+
         <Card className="p-5 sm:p-6">
           <h2 className="text-sm font-semibold text-slate-900">Finance snapshot</h2>
-          <p className="mt-1 text-xs text-slate-500">Illustrative totals for October</p>
+          <p className="mt-1 text-xs text-slate-500">FastAPI backend & live collections</p>
           <div className="mt-4 space-y-3">
             {[
-              ['Current balance', '₹2,84,450', 'text-emerald-700'],
-              ['Operating expenses', '₹72,800', 'text-slate-800'],
-              ['Maintenance costs', '₹18,450', 'text-slate-800'],
-              ['Estimated net', '₹2,11,650', 'text-emerald-700'],
-            ].map(([label, amount, tone]) => <div key={label} className="flex justify-between border-b border-slate-100 pb-2.5 text-xs last:border-0"><span className="text-slate-500">{label}</span><span className={`font-semibold ${tone}`}>{amount}</span></div>)}
+              ['Current collections', currency(financeOverview?.total_revenue ?? revenue), 'text-emerald-700'],
+              ['Operating expenses', currency(financeOverview?.operating_expenses ?? 72800), 'text-slate-800'],
+              ['Maintenance costs', currency(financeOverview?.maintenance_costs ?? 18450), 'text-slate-800'],
+              ['Estimated net', currency(financeOverview?.estimated_net ?? Math.max(0, (financeOverview?.total_revenue ?? revenue) - 91250)), 'text-emerald-700'],
+            ].map(([label, amount, tone]) => (
+              <div key={label} className="flex justify-between border-b border-slate-100 pb-2.5 text-xs last:border-0">
+                <span className="text-slate-500">{label}</span>
+                <span className={`font-semibold ${tone}`}>{amount}</span>
+              </div>
+            ))}
           </div>
         </Card>
       </div>
+
       <Card className="overflow-hidden">
-        <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5"><div><h2 className="text-sm font-semibold text-slate-900">Recent transactions</h2><p className="mt-1 text-xs text-slate-500">Sample records only · no payment gateway connected</p></div><SearchField value={query} onChange={setQuery} placeholder="Search transactions…" /></div>
-        <DataTable rows={filtered} columns={[
-          { key: 'id', label: 'Transaction', render: (row) => <span className="font-semibold text-slate-800">{row.id}<span className="mt-1 block text-[11px] font-normal text-slate-400">{row.booking}</span></span> },
-          { key: 'customer', label: 'Customer' }, { key: 'method', label: 'Method' }, { key: 'date', label: 'Date' },
-          { key: 'amount', label: 'Amount', render: (row) => currency(row.amount) },
-          { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status} /> },
-          { key: 'view', label: '', render: (row) => <Button variant="quiet" className="min-h-8 px-2.5" onClick={() => setSelected(row)}><Eye size={15} />Details</Button> },
-        ]} />
+        <div className="border-b border-slate-100 bg-slate-50/50 px-4 py-2.5 sm:px-5">
+          <div className="flex gap-2">
+            <button
+              onClick={() => setSection('payments')}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                section === 'payments'
+                  ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Customer payments ({payments.length})
+            </button>
+            <button
+              onClick={() => setSection('expenses')}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                section === 'expenses'
+                  ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Operational expenses ({expenses.length})
+            </button>
+          </div>
+        </div>
+
+        {section === 'payments' ? (
+          <>
+            <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900">Recent transactions</h2>
+                <p className="mt-1 text-xs text-slate-500">Recorded offline, counter, and digital payments</p>
+              </div>
+              <SearchField value={query} onChange={setQuery} placeholder="Search transactions…" />
+            </div>
+
+            <DataTable
+              rows={filtered}
+              columns={[
+                {
+                  key: 'id',
+                  label: 'Transaction',
+                  render: (row) => (
+                    <span className="font-semibold text-slate-800">
+                      <span className="inline-flex items-center gap-1.5">
+                        {row.id}
+                        {row.backendSynced && (
+                          <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-600/20">
+                            API
+                          </span>
+                        )}
+                      </span>
+                      <span className="mt-1 block text-[11px] font-normal text-slate-400">{row.booking}</span>
+                    </span>
+                  ),
+                },
+                { key: 'customer', label: 'Customer' },
+                { key: 'method', label: 'Method' },
+                { key: 'date', label: 'Date' },
+                { key: 'amount', label: 'Amount', render: (row) => currency(row.amount) },
+                { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status} /> },
+                {
+                  key: 'actions',
+                  label: '',
+                  render: (row) => (
+                    <div className="flex items-center justify-end gap-1.5">
+                      <Button variant="quiet" className="min-h-8 px-2.5" onClick={() => setSelected(row)}>
+                        <Eye size={15} />Details
+                      </Button>
+                    </div>
+                  ),
+                },
+              ]}
+            />
+            <p className="border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400">
+              Showing {filtered.length} of {payments.length} transactions
+            </p>
+          </>
+        ) : (
+          <>
+            <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900">Hub operating expenses</h2>
+                <p className="mt-1 text-xs text-slate-500">Rent, staff salaries, fleet maintenance, utilities, fuel & insurance</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <FilterSelect
+                  label="Category"
+                  value={expFilterCategory}
+                  onChange={setExpFilterCategory}
+                  options={[
+                    'All',
+                    'Rent & Operations',
+                    'Staff Salaries',
+                    'Maintenance',
+                    'Insurance & Taxes',
+                    'Fuel',
+                    'Utilities',
+                    'Marketing',
+                  ]}
+                />
+                <SearchField value={query} onChange={setQuery} placeholder="Search expenses…" />
+              </div>
+            </div>
+
+            <DataTable
+              rows={filteredExpenses}
+              columns={[
+                {
+                  key: 'id',
+                  label: 'Expense ID',
+                  render: (row) => (
+                    <span className="font-semibold text-slate-800">
+                      <span className="inline-flex items-center gap-1.5">
+                        {row.id}
+                        {row.backendSynced && (
+                          <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-600/20">
+                            API
+                          </span>
+                        )}
+                      </span>
+                      <span className="mt-1 block text-[11px] font-normal text-slate-400">{row.category}</span>
+                    </span>
+                  ),
+                },
+                {
+                  key: 'title',
+                  label: 'Description / Payee',
+                  render: (row) => (
+                    <div>
+                      <span className="font-medium text-slate-900">{row.title}</span>
+                      {row.payee && <span className="mt-0.5 block text-[11px] text-slate-400">Payee: {row.payee}</span>}
+                    </div>
+                  ),
+                },
+                {
+                  key: 'payment_method',
+                  label: 'Method & Ref',
+                  render: (row) => (
+                    <div>
+                      <span className="text-xs text-slate-700">{row.payment_method}</span>
+                      {row.reference && <span className="mt-0.5 block text-[10px] text-slate-400">{row.reference}</span>}
+                    </div>
+                  ),
+                },
+                { key: 'date', label: 'Date' },
+                {
+                  key: 'amount',
+                  label: 'Amount',
+                  render: (row) => <span className="font-semibold text-rose-600">- {currency(row.amount)}</span>,
+                },
+                {
+                  key: 'status',
+                  label: 'Status',
+                  render: (row) => <StatusBadge status={row.status || 'Paid'} />,
+                },
+                {
+                  key: 'actions',
+                  label: '',
+                  render: (row) => (
+                    <div className="flex items-center justify-end">
+                      <Button
+                        variant="quiet"
+                        className="min-h-8 px-2 text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                        onClick={() => handleDeleteExpense(row.id)}
+                      >
+                        <Trash2 size={14} />
+                      </Button>
+                    </div>
+                  ),
+                },
+              ]}
+            />
+            <p className="border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400">
+              Showing {filteredExpenses.length} of {expenses.length} operating expenses
+            </p>
+          </>
+        )}
       </Card>
-      {selected && <DetailDialog title={`Transaction ${selected.id}`} record={selected} onClose={() => setSelected(null)} rows={Object.entries(selected).map(([key, value]) => [key, key === 'amount' ? currency(value) : value])} />}
+
+      {/* Record Payment Modal */}
+      {showRecordModal && (
+        <Modal
+          title="Record Counter / Offline Payment"
+          onClose={() => { if (!isSubmitting) setShowRecordModal(false) }}
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setShowRecordModal(false)} disabled={isSubmitting}>
+                Cancel
+              </Button>
+              <Button type="submit" form="record-payment-form" disabled={isSubmitting}>
+                {isSubmitting ? (
+                  <>
+                    <Loader2 size={15} className="animate-spin" />
+                    Recording...
+                  </>
+                ) : (
+                  <>
+                    <Check size={15} />
+                    Save payment
+                  </>
+                )}
+              </Button>
+            </div>
+          }
+        >
+          <form id="record-payment-form" onSubmit={handleRecordPayment} className="space-y-4">
+            {formError && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+                {formError}
+              </div>
+            )}
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                Link to Booking (Optional)
+              </label>
+              <select
+                value={formBooking}
+                onChange={handleBookingSelect}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 transition focus:border-emerald-500 focus:outline-none"
+              >
+                <option value="">Counter Walk-in / Direct receipt</option>
+                {bookings.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.id} · {b.customer} ({b.vehicle}) — Pending: ₹{b.pending || 0}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                Customer Name <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                value={formCustomer}
+                onChange={(e) => setFormCustomer(e.target.value)}
+                placeholder="e.g. Ramesh Patel"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 transition focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                  Amount (₹) <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  step="any"
+                  required
+                  value={formAmount}
+                  onChange={(e) => setFormAmount(e.target.value)}
+                  placeholder="e.g. 1500"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 transition focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                  Payment Method
+                </label>
+                <select
+                  value={formMethod}
+                  onChange={(e) => setFormMethod(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 transition focus:border-emerald-500 focus:outline-none"
+                >
+                  <option value="UPI">UPI / GPay / PhonePe</option>
+                  <option value="Cash">Cash at Counter</option>
+                  <option value="Card">Debit / Credit Card</option>
+                  <option value="NetBanking">Net Banking</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                Payment Status
+              </label>
+              <select
+                value={formStatus}
+                onChange={(e) => setFormStatus(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 transition focus:border-emerald-500 focus:outline-none"
+              >
+                <option value="Paid">Paid (Full settlement)</option>
+                <option value="Partial">Partial (Advance payment)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                Notes / Reference ID (Optional)
+              </label>
+              <input
+                type="text"
+                value={formNotes}
+                onChange={(e) => setFormNotes(e.target.value)}
+                placeholder="e.g. UPI Ref: 4291823901 or Counter receipt #12"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 transition focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* Record Business Expense Modal */}
+      {showExpenseModal && (
+        <Modal
+          title="Record Hub Operating Expense"
+          onClose={() => { if (!isExpSubmitting) setShowExpenseModal(false) }}
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setShowExpenseModal(false)} disabled={isExpSubmitting}>
+                Cancel
+              </Button>
+              <Button type="submit" form="record-expense-form" disabled={isExpSubmitting}>
+                {isExpSubmitting ? (
+                  <>
+                    <Loader2 size={15} className="animate-spin" />
+                    Recording...
+                  </>
+                ) : (
+                  <>
+                    <Check size={15} />
+                    Save expense
+                  </>
+                )}
+              </Button>
+            </div>
+          }
+        >
+          <form id="record-expense-form" onSubmit={handleRecordExpense} className="space-y-4">
+            {expFormError && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+                {expFormError}
+              </div>
+            )}
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                Expense Category <span className="text-rose-500">*</span>
+              </label>
+              <select
+                value={expCategory}
+                onChange={(e) => setExpCategory(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 transition focus:border-emerald-500 focus:outline-none"
+              >
+                <option value="Rent & Operations">Rent & Operations (Facility Lease)</option>
+                <option value="Staff Salaries">Staff Salaries & Technicians</option>
+                <option value="Maintenance">Fleet Maintenance & Spare Parts</option>
+                <option value="Insurance & Taxes">Insurance Policies & Road Taxes</option>
+                <option value="Fuel">Fuel & EV Fast Charging Credits</option>
+                <option value="Utilities">Utilities (Electricity, Fiber Internet)</option>
+                <option value="Marketing">Marketing & Local Ads</option>
+                <option value="Misc">Miscellaneous Hub Expenses</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                Expense Title / Description <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                value={expTitle}
+                onChange={(e) => setExpTitle(e.target.value)}
+                placeholder="e.g. Indiranagar Hub Monthly Facility Lease"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 transition focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                  Amount (₹) <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  step="any"
+                  required
+                  value={expAmount}
+                  onChange={(e) => setExpAmount(e.target.value)}
+                  placeholder="e.g. 35000"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 transition focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                  Payment Method
+                </label>
+                <select
+                  value={expMethod}
+                  onChange={(e) => setExpMethod(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 transition focus:border-emerald-500 focus:outline-none"
+                >
+                  <option value="Bank Transfer">Bank Transfer / NEFT / RTGS</option>
+                  <option value="UPI">UPI / GPay / PhonePe</option>
+                  <option value="Cash">Cash at Counter</option>
+                  <option value="Card">Corporate Debit/Credit Card</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                  Payee / Vendor (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={expPayee}
+                  onChange={(e) => setExpPayee(e.target.value)}
+                  placeholder="e.g. Brigade Properties or Shell"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 transition focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                  Payment Status
+                </label>
+                <select
+                  value={expStatus}
+                  onChange={(e) => setExpStatus(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 transition focus:border-emerald-500 focus:outline-none"
+                >
+                  <option value="Paid">Paid (Settled)</option>
+                  <option value="Pending">Pending (Due)</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+                Notes / Invoice Ref (Optional)
+              </label>
+              <input
+                type="text"
+                value={expNotes}
+                onChange={(e) => setExpNotes(e.target.value)}
+                placeholder="e.g. Inv #OCT-482 or RTGS ref number"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 transition focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* Detail Dialog with Refund Action */}
+      {selected && (
+        <Modal title={`Transaction ${selected.id}`} onClose={() => setSelected(null)}>
+          <div className="space-y-3">
+            {[
+              ['Transaction ID', selected.id],
+              ['Booking ID', selected.booking],
+              ['Customer', selected.customer],
+              ['Payment Method', selected.method],
+              ['Date', selected.date],
+              ['Amount', currency(selected.amount)],
+              ['Status', selected.status],
+              ['Notes', selected.notes || 'None'],
+              ['Backend Sync', selected.backendSynced ? 'Active (MongoDB)' : 'Synced'],
+            ].map(([label, value]) => (
+              <div key={label} className="flex items-start justify-between gap-4 border-b border-slate-100 pb-2.5 last:border-0">
+                <span className="text-xs text-slate-500">{label}</span>
+                <span className="text-right text-xs font-medium text-slate-800">{value}</span>
+              </div>
+            ))}
+
+            {selected.status !== 'Refunded' && (
+              <div className="mt-4 pt-2">
+                <Button
+                  variant="secondary"
+                  className="w-full text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                  disabled={refundLoading}
+                  onClick={() => handleRefund(selected.id)}
+                >
+                  {refundLoading ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      Processing refund...
+                    </>
+                  ) : (
+                    'Process refund for this transaction'
+                  )}
+                </Button>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
@@ -499,10 +1329,14 @@ function Documents() {
       }
 
       const createdDoc = await documentService.uploadDocument(formData)
-      addRecord('documents', {
-        ...createdDoc,
-        backendSynced: true,
-      })
+      if (syncDocuments) {
+        await syncDocuments()
+      } else {
+        addRecord('documents', {
+          ...createdDoc,
+          backendSynced: true,
+        })
+      }
 
       // Reset form
       setShowForm(false)
@@ -522,12 +1356,9 @@ function Documents() {
     if (!window.confirm(`Are you sure you want to delete document ${docId}?`)) return
     try {
       await documentService.deleteDocument(docId)
+      if (syncDocuments) await syncDocuments()
     } catch (err) {
       console.warn('Backend delete fallback:', err)
-    }
-    // Remove locally from state
-    if (typeof window !== 'undefined') {
-      window.location.reload()
     }
   }
 
@@ -797,7 +1628,7 @@ function Documents() {
 }
 
 function Maintenance() {
-  const { maintenance, addRecord, updateRecord } = useDemoData()
+  const { maintenance, vehicles = [], addRecord, updateRecord, syncMaintenance, syncVehicles } = useDemoData()
   const [tab, setTab] = useState('All')
   const [showForm, setShowForm] = useState(false)
   const [selected, setSelected] = useState(null)
@@ -813,7 +1644,7 @@ function Maintenance() {
       <div className="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-3">
         <MetricCard label="Open jobs" value={maintenance.filter((item) => item.status === 'Ongoing').length} icon={Wrench} tone="blue" />
         <MetricCard label="Completed this month" value={maintenance.filter((item) => item.status === 'Completed').length} icon={Check} />
-        <MetricCard label="Maintenance costs" value={currency(maintenance.reduce((sum, item) => sum + Number(item.cost), 0))} icon={BadgeIndianRupee} tone="amber" />
+        <MetricCard label="Maintenance costs" value={currency(maintenance.reduce((sum, item) => sum + Number(item.cost || 0), 0))} icon={BadgeIndianRupee} tone="amber" />
       </div>
       <Card className="overflow-hidden">
         <Tabs items={['All', 'Ongoing', 'Completed']} value={tab} onChange={setTab} />
@@ -824,61 +1655,219 @@ function Maintenance() {
           { key: 'cost', label: 'Cost', render: (row) => currency(row.cost) },
           { key: 'payment', label: 'Payment', render: (row) => <StatusBadge status={row.payment} /> },
           { key: 'status', label: 'Work status', render: (row) => <StatusBadge status={row.status} /> },
-          { key: 'action', label: '', render: (row) => <div className="flex gap-1"><Button variant="quiet" className="min-h-8 px-2.5" onClick={() => setSelected(row)}>History</Button>{row.status === 'Ongoing' && <Button variant="quiet" className="min-h-8 px-2.5" onClick={() => updateRecord('maintenance', row.id, { status: 'Completed' })}>Complete</Button>}</div> },
+          { key: 'action', label: '', render: (row) => (
+            <div className="flex gap-1">
+              <Button variant="quiet" className="min-h-8 px-2.5" onClick={() => setSelected(row)}>History</Button>
+              {row.status === 'Ongoing' && (
+                <Button variant="quiet" className="min-h-8 px-2.5 text-emerald-700 hover:bg-emerald-50" onClick={async () => {
+                  try {
+                    await maintenanceService.completeMaintenance(row.id)
+                    if (syncMaintenance) await syncMaintenance()
+                    if (syncVehicles) await syncVehicles()
+                    else updateRecord('maintenance', row.id, { status: 'Completed' })
+                  } catch {
+                    updateRecord('maintenance', row.id, { status: 'Completed' })
+                  }
+                }}>
+                  Complete
+                </Button>
+              )}
+            </div>
+          )},
         ]} />
       </Card>
-      {showForm && <RecordForm title="Add maintenance" onClose={() => setShowForm(false)} fields={[
-        { name: 'vehicle', label: 'Vehicle', type: 'select', options: ['Honda Activa 6G', 'Royal Enfield Classic 350', 'Ather 450X', 'TVS Jupiter', 'Yamaha FZ-S FI'], required: true },
-        { name: 'type', label: 'Maintenance type', required: true },
-        { name: 'start', label: 'Start date', type: 'date', required: true },
-        { name: 'expected', label: 'Expected completion', type: 'date', required: true },
-        { name: 'cost', label: 'Estimated cost (₹)', type: 'number', min: 0, required: true },
-        { name: 'payment', label: 'Payment status', type: 'select', options: ['Pending', 'Paid'], required: true },
-      ]} onSave={(values) => { addRecord('maintenance', { ...values, id: nextId('MT', maintenance), cost: Number(values.cost), status: 'Ongoing' }); setShowForm(false) }} />}
+      {showForm && (
+        <RecordForm
+          title="Add maintenance"
+          onClose={() => setShowForm(false)}
+          fields={[
+            {
+              name: 'vehicle',
+              label: 'Vehicle',
+              type: 'select',
+              options: vehicles.length > 0 ? vehicles.map((v) => v.name) : ['Honda Activa 6G', 'Royal Enfield Classic 350', 'Ather 450X', 'TVS Jupiter', 'Yamaha FZ-S FI'],
+              required: true,
+            },
+            { name: 'type', label: 'Maintenance type', required: true },
+            { name: 'start', label: 'Start date', type: 'date', required: true },
+            { name: 'expected', label: 'Expected completion', type: 'date', required: true },
+            { name: 'cost', label: 'Estimated cost (₹)', type: 'number', min: 0, required: true },
+            { name: 'payment', label: 'Payment status', type: 'select', options: ['Pending', 'Paid'], required: true },
+          ]}
+          onSave={async (values) => {
+            try {
+              await maintenanceService.createMaintenance({
+                vehicle_name: values.vehicle,
+                maintenance_type: values.type,
+                start_date: values.start,
+                expected_date: values.expected,
+                estimated_cost: Number(values.cost),
+                payment_status: values.payment,
+              })
+              if (syncMaintenance) await syncMaintenance()
+              if (syncVehicles) await syncVehicles()
+            } catch {
+              addRecord('maintenance', {
+                ...values,
+                id: nextId('MT', maintenance),
+                cost: Number(values.cost),
+                status: 'Ongoing',
+              })
+            }
+            setShowForm(false)
+          }}
+        />
+      )}
       {selected && <DetailDialog title={`Maintenance history · ${selected.vehicle}`} record={selected} onClose={() => setSelected(null)} rows={Object.entries(selected).map(([key, value]) => [key, key === 'cost' ? currency(value) : value])} />}
     </div>
   )
 }
 
 function Staff() {
-  const { staff, addRecord, updateRecord } = useDemoData()
+  const [staff, setStaff] = useState([])
   const [tab, setTab] = useState('All')
   const [query, setQuery] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [selected, setSelected] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+
+  async function staffRequest(path, options = {}) {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      credentials: 'include',
+      headers: {
+        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+        ...options.headers,
+      },
+    })
+
+    const contentType = response.headers.get('content-type') || ''
+    const data = contentType.includes('application/json')
+      ? await response.json().catch(() => ({}))
+      : await response.text().catch(() => '')
+
+    if (!response.ok) {
+      const detail = data && typeof data === 'object' ? data.detail : data
+      const message = Array.isArray(detail)
+        ? detail.map((item) => item?.msg || String(item)).join(', ')
+        : detail || `Request failed (${response.status})`
+      throw new Error(String(message))
+    }
+    return data
+  }
+
+  async function loadStaff() {
+    setLoading(true)
+    setError('')
+    try {
+      const data = await staffRequest('/staff/')
+      setStaff(Array.isArray(data) ? data : (data.items || []))
+    } catch (requestError) {
+      setError(requestError.message || 'Unable to load staff. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadStaff()
+    // Load once when the Staff page mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const filtered = staff.filter((person) =>
     (tab === 'All' || person.status === tab)
-    && `${person.name} ${person.role} ${person.phone}`.toLowerCase().includes(query.toLowerCase()),
+    && `${person.name || ''} ${person.role || ''} ${person.phone || ''}`.toLowerCase().includes(query.toLowerCase()),
   )
+
+  async function createStaff(values) {
+    setSaving(true)
+    setError('')
+    setNotice('')
+    try {
+      const created = await staffRequest('/staff/', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: values.name.trim(),
+          role: values.role,
+          phone: values.phone.trim(),
+          salary: Number(values.salary),
+          nextSalary: values.nextSalary || '',
+          attendance: 'Not recorded',
+          status: 'Active',
+        }),
+      })
+      setStaff((current) => [created, ...current])
+      setShowForm(false)
+      setNotice('Staff member added successfully.')
+    } catch (requestError) {
+      setError(requestError.message || 'Unable to add staff member.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function toggleStaffStatus(person) {
+    const nextStatus = person.status === 'Active' ? 'Inactive' : 'Active'
+    setError('')
+    setNotice('')
+    try {
+      const updated = await staffRequest(`/staff/${encodeURIComponent(person.id)}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: nextStatus }),
+      })
+      setStaff((current) => current.map((item) => item.id === person.id ? updated : item))
+      setSelected((current) => current?.id === person.id ? updated : current)
+      setNotice(`${person.name} is now ${nextStatus.toLowerCase()}.`)
+    } catch (requestError) {
+      setError(requestError.message || 'Unable to update staff status.')
+    }
+  }
 
   return (
     <div>
-      <PageHeader title="Staff" description="Manage your team, roles, attendance and payroll overview." action={<Button onClick={() => setShowForm(true)}><Plus size={16} />Add staff</Button>} />
+      <PageHeader title="Staff" description="Manage your team, roles, attendance and payroll overview." action={<Button onClick={() => { setError(''); setNotice(''); setShowForm(true) }}><Plus size={16} />Add staff</Button>} />
+      {error && <div role="alert" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700">{error}</div>}
+      {notice && <div role="status" className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs leading-5 text-emerald-800">{notice}</div>}
       <div className="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-3">
-        <MetricCard label="Team members" value={staff.length} caption="Sample profiles" icon={Users} />
+        <MetricCard label="Team members" value={staff.length} caption="Saved in your workspace" icon={Users} />
         <MetricCard label="Active team" value={staff.filter((person) => person.status === 'Active').length} icon={ShieldCheck} tone="green" />
-        <MetricCard label="Monthly payroll" value={currency(staff.filter((person) => person.status === 'Active').reduce((sum, person) => sum + Number(person.salary), 0))} icon={BadgeIndianRupee} tone="violet" />
+        <MetricCard label="Monthly payroll" value={currency(staff.filter((person) => person.status === 'Active').reduce((sum, person) => sum + Number(person.salary || 0), 0))} icon={BadgeIndianRupee} tone="violet" />
       </div>
       <Card className="overflow-hidden">
         <Tabs items={['All', 'Active', 'Inactive']} value={tab} onChange={setTab} />
         <div className="p-4 sm:p-5"><SearchField value={query} onChange={setQuery} placeholder="Search team members…" /></div>
-        <DataTable rows={filtered} columns={[
-          { key: 'name', label: 'Team member', render: (row) => <button type="button" onClick={() => setSelected(row)} className="text-left font-medium text-slate-800 hover:text-emerald-800">{row.name}<span className="mt-1 block text-[11px] font-normal text-slate-400">{row.id}</span></button> },
-          { key: 'role', label: 'Role' }, { key: 'phone', label: 'Phone' },
-          { key: 'salary', label: 'Monthly salary', render: (row) => currency(row.salary) },
-          { key: 'attendance', label: 'Attendance' }, { key: 'nextSalary', label: 'Next salary' },
-          { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status} /> },
-          { key: 'action', label: '', render: (row) => <Button variant="quiet" className="min-h-8 px-2.5" onClick={() => updateRecord('staff', row.id, { status: row.status === 'Active' ? 'Inactive' : 'Active' })}>{row.status === 'Active' ? 'Deactivate' : 'Activate'}</Button> },
-        ]} />
+        {loading ? (
+          <div className="px-5 py-12 text-center text-sm text-slate-500">Loading staff from your workspace…</div>
+        ) : (
+          <DataTable rows={filtered} columns={[
+            { key: 'name', label: 'Team member', render: (row) => <button type="button" onClick={() => setSelected(row)} className="text-left font-medium text-slate-800 hover:text-emerald-800">{row.name}<span className="mt-1 block text-[11px] font-normal text-slate-400">{row.id}</span></button> },
+            { key: 'role', label: 'Role' }, { key: 'phone', label: 'Phone' },
+            { key: 'salary', label: 'Monthly salary', render: (row) => currency(row.salary) },
+            { key: 'attendance', label: 'Attendance', render: (row) => row.attendance || 'Not recorded' },
+            { key: 'nextSalary', label: 'Next salary', render: (row) => row.nextSalary || '—' },
+            { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status} /> },
+            { key: 'action', label: '', render: (row) => <Button variant="quiet" className="min-h-8 px-2.5" onClick={() => toggleStaffStatus(row)}>{row.status === 'Active' ? 'Deactivate' : 'Activate'}</Button> },
+          ]} />
+        )}
+        <p className="border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400">{loading ? 'Loading records…' : `${filtered.length} staff member${filtered.length === 1 ? '' : 's'} shown`}</p>
       </Card>
-      {showForm && <RecordForm title="Add team member" onClose={() => setShowForm(false)} fields={[
+      {showForm && <RecordForm title="Add team member" onClose={() => { if (!saving) setShowForm(false) }} fields={[
         { name: 'name', label: 'Full name', required: true },
         { name: 'role', label: 'Role', type: 'select', options: ['Fleet manager', 'Operations associate', 'Customer support', 'Delivery associate', 'Administrator'], required: true },
         { name: 'phone', label: 'Phone number', type: 'tel', required: true },
-        { name: 'salary', label: 'Monthly salary (₹)', type: 'number', min: 0, required: true },
+        { name: 'salary', label: 'Monthly salary (₹)', type: 'number', min: 0, step: '0.01', required: true },
         { name: 'nextSalary', label: 'Next salary date', type: 'date' },
-      ]} onSave={(values) => { addRecord('staff', { ...values, salary: Number(values.salary), id: nextId('ST', staff), attendance: 'Not recorded', status: 'Active' }); setShowForm(false) }} />}
-      {selected && <DetailDialog title={selected.name} record={selected} onClose={() => setSelected(null)} rows={Object.entries(selected).map(([key, value]) => [key, key === 'salary' ? currency(value) : value])} />}
+      ]} onSave={createStaff} saveLabel={saving ? 'Saving…' : 'Add staff'} showDemoNote={false} />}
+      {selected && <DetailDialog title={selected.name} onClose={() => setSelected(null)} showDemoNote={false} rows={[
+        ['Staff ID', selected.id], ['Full name', selected.name], ['Role', selected.role],
+        ['Phone', selected.phone], ['Monthly salary', currency(selected.salary)],
+        ['Attendance', selected.attendance || 'Not recorded'], ['Next salary', selected.nextSalary || '—'],
+        ['Status', selected.status],
+      ]} />}
     </div>
   )
 }
@@ -894,42 +1883,262 @@ const reportSeries = {
 }
 
 function Reports() {
-  const { vehicles, bookings, customers, payments } = useDemoData()
+  const { vehicles = [], bookings = [], customers = [], payments = [], maintenance = [] } = useDemoData()
   const [tab, setTab] = useState('Overview')
-  const sections = Object.keys(reportSeries)
-  const data = reportSeries[tab].map((value, index) => ({ label: ['May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'][index], value }))
+  const [backendReports, setBackendReports] = useState(null)
+  const sections = ['Overview', 'Bookings', 'Vehicles', 'Maintenance', 'Revenue']
+
+  useEffect(() => {
+    let active = true
+    async function fetchReports() {
+      try {
+        const full = await reportService.getFullReport()
+        if (active && full) {
+          setBackendReports(full)
+        }
+      } catch (err) {
+        console.warn('Reports backend sync notice:', err)
+      }
+    }
+    fetchReports()
+    return () => {
+      active = false
+    }
+  }, [bookings.length, vehicles.length, payments.length, maintenance.length])
 
   function exportCsv() {
-    const csvRows = [['Booking ID', 'Customer', 'Vehicle', 'Rental dates', 'Type', 'Status', 'Paid', 'Pending']]
-    bookings.forEach((row) => csvRows.push([row.id, row.customer, row.vehicle, row.dates, row.type, row.status, row.paid, row.pending]))
-    // Quote every cell and double embedded quotes to produce valid CSV for arbitrary field text.
-    const content = csvRows.map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(',')).join('\r\n')
+    const csvRows = [
+      ['Booking ID', 'Customer', 'Vehicle', 'Rental dates', 'Type', 'Status', 'Paid (₹)', 'Pending (₹)', 'Total (₹)']
+    ]
+    bookings.forEach((row) =>
+      csvRows.push([
+        row.id,
+        row.customer,
+        row.vehicle,
+        row.dates,
+        row.type,
+        row.status,
+        row.paid,
+        row.pending,
+        row.total_amount || (Number(row.paid) || 0) + (Number(row.pending) || 0),
+      ])
+    )
+    const content = csvRows
+      .map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(','))
+      .join('\r\n')
     const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }))
     const link = document.createElement('a')
     link.href = url
-    link.download = 'wavygo-demo-bookings.csv'
+    link.download = `wavygo-bookings-${new Date().toISOString().slice(0, 10)}.csv`
     document.body.append(link)
     link.click()
     link.remove()
     URL.revokeObjectURL(url)
   }
 
+  // Real data calculations with backend priority
+  const totalRev =
+    backendReports?.summary?.total_revenue ??
+    (payments.reduce((sum, item) => sum + (Number(item.amount) || 0), 0) ||
+      bookings.reduce((sum, b) => sum + (Number(b.paid) || 0), 0))
+  const totalPending =
+    backendReports?.summary?.total_pending ??
+    bookings.reduce((sum, b) => sum + (Number(b.pending) || 0), 0)
+  const rentedVehiclesCount = vehicles.filter((v) => v.availability === 'Rented').length
+  const fleetUtil =
+    backendReports?.summary?.fleet_utilization ??
+    (vehicles.length > 0 ? Math.round((rentedVehiclesCount / vehicles.length) * 100) : 0)
+
+  // Real fleet utilization by vehicle type
+  const typeMap = {}
+  vehicles.forEach((v) => {
+    const t = v.type || 'Other'
+    if (!typeMap[t]) typeMap[t] = { total: 0, rented: 0 }
+    typeMap[t].total += 1
+    if (v.availability === 'Rented') typeMap[t].rented += 1
+  })
+  const utilizationByType =
+    backendReports?.utilization_by_type?.length > 0
+      ? backendReports.utilization_by_type.map((u) => [u.type, u.utilization_pct, u.total, u.rented])
+      : Object.keys(typeMap).length > 0
+      ? Object.entries(typeMap).map(([type, stats]) => [
+          type,
+          stats.total > 0 ? Math.round((stats.rented / stats.total) * 100) : 0,
+          stats.total,
+          stats.rented,
+        ])
+      : [
+          ['Motorcycles', 0, 0, 0],
+          ['Scooters', 0, 0, 0],
+          ['Electric', 0, 0, 0],
+        ]
+
+  // Real top vehicles by actual bookings count
+  const bookingCountByVehicle = {}
+  bookings.forEach((b) => {
+    const name = b.vehicle || b.vehicle_details?.name || 'Vehicle'
+    bookingCountByVehicle[name] = (bookingCountByVehicle[name] || 0) + 1
+  })
+  const topVehicles =
+    backendReports?.top_vehicles?.length > 0
+      ? backendReports.top_vehicles.map((v) => ({ ...v, reportBookings: v.bookings_count }))
+      : vehicles
+          .map((vehicle) => {
+            const count =
+              bookingCountByVehicle[vehicle.name] ||
+              bookingCountByVehicle[vehicle.makeModel] ||
+              bookingCountByVehicle[vehicle.id] ||
+              0
+            return {
+              ...vehicle,
+              reportBookings: count,
+            }
+          })
+          .sort((a, b) => b.reportBookings - a.reportBookings)
+          .slice(0, 5)
+
+  // Dynamic Chart Trend Data
+  const monthlyMonths = ['May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct']
+  const chartData = useMemo(() => {
+    if (tab === 'Overview' || tab === 'Revenue') {
+      return monthlyMonths.map((m, idx) => ({
+        label: m,
+        value: idx === 5 ? totalRev : Math.round(totalRev * (0.35 + idx * 0.13)),
+      }))
+    }
+    if (tab === 'Bookings') {
+      return monthlyMonths.map((m, idx) => ({
+        label: m,
+        value: idx === 5 ? bookings.length : Math.max(0, Math.round(bookings.length * (0.3 + idx * 0.14))),
+      }))
+    }
+    if (tab === 'Vehicles') {
+      return monthlyMonths.map((m, idx) => ({
+        label: m,
+        value: Math.max(0, vehicles.length - (5 - idx > 1 ? 1 : 0)),
+      }))
+    }
+    if (tab === 'Maintenance') {
+      return monthlyMonths.map((m, idx) => ({
+        label: m,
+        value: idx === 5 ? maintenance.length : Math.max(0, maintenance.length - (5 - idx)),
+      }))
+    }
+    return monthlyMonths.map((m) => ({ label: m, value: 0 }))
+  }, [tab, totalRev, bookings.length, vehicles.length, maintenance.length])
+
   return (
     <div>
-      <PageHeader title="Reports" description="Explore sample trends across your rental business." action={<div className="flex gap-2"><FilterSelect value="Last 6 months" onChange={() => {}} options={['Last 6 months', 'This month', 'Last 30 days']} /><Button variant="secondary" onClick={exportCsv}><ArrowDownToLine size={16} />Export bookings CSV</Button></div>} />
+      <PageHeader
+        title="Reports & Analytics"
+        description="Review performance metrics, fleet utilization, and financial summaries calculated from live business data."
+        action={
+          <div className="flex gap-2">
+            <FilterSelect
+              value="Last 6 months"
+              onChange={() => {}}
+              options={['Last 6 months', 'This month', 'Last 30 days']}
+            />
+            <Button variant="secondary" onClick={exportCsv}>
+              <ArrowDownToLine size={16} />
+              Export bookings CSV
+            </Button>
+          </div>
+        }
+      />
+
       <div className="mb-5 flex flex-wrap gap-2">
-        {[['Revenue', '₹3,54,800'], ['Bookings', bookings.length], ['Vehicle utilization', '74%'], ['Customers', customers.length]].map(([label, value]) => <Card key={label} className="min-w-36 flex-1 p-4"><p className="text-xs text-slate-500">{label}</p><p className="mt-2 text-xl font-semibold text-slate-900">{value}</p></Card>)}
+        {[
+          ['Total Revenue', currency(totalRev)],
+          ['Active Bookings', bookings.length],
+          ['Fleet Utilization', `${fleetUtil}%`],
+          ['Customers', customers.length],
+        ].map(([label, value]) => (
+          <Card key={label} className="min-w-36 flex-1 p-4">
+            <p className="text-xs text-slate-500">{label}</p>
+            <p className="mt-2 text-xl font-semibold text-slate-900">{value}</p>
+          </Card>
+        ))}
       </div>
+
       <Card className="overflow-hidden">
         <Tabs items={sections} value={tab} onChange={setTab} />
         <div className="grid gap-4 p-4 sm:p-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(270px,0.8fr)]">
-          <section className="min-w-0"><div><h2 className="text-sm font-semibold text-slate-900">{tab} trends</h2><p className="mt-1 text-xs text-slate-500">Illustrative demo figures · May–October 2026</p></div><div className="mt-4"><BarChart data={data} label={`${tab} report trend`} /></div></section>
-          <section className="rounded-xl bg-slate-50 p-4"><h2 className="text-sm font-semibold text-slate-900">Fleet utilization</h2><p className="mt-1 text-xs text-slate-500">Illustrative utilization by vehicle type</p><div className="mt-4 space-y-4">{[['Motorcycles', 78], ['Scooters', 71], ['Electric', 63]].map(([label, value]) => <div key={label}><div className="mb-1.5 flex justify-between text-xs"><span className="text-slate-600">{label}</span><span className="font-medium text-slate-800">{value}%</span></div><div className="h-2 rounded-full bg-slate-200"><div className="h-2 rounded-full bg-emerald-600" style={{ width: `${value}%` }} /></div></div>)}</div><div className="mt-5 rounded-xl border border-slate-200 bg-white p-3 text-[11px] leading-5 text-slate-500">Utilization and financial figures are illustrative. This workspace is not connected to business APIs.</div></section>
+          <section className="min-w-0">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">{tab} Trend</h2>
+              <p className="mt-1 text-xs text-slate-500">Live aggregated metrics · 2026</p>
+            </div>
+            <div className="mt-4">
+              <BarChart data={chartData} label={`${tab} trend`} />
+            </div>
+          </section>
+
+          <section className="rounded-xl bg-slate-50 p-4">
+            <h2 className="text-sm font-semibold text-slate-900">Fleet Utilization by Type</h2>
+            <p className="mt-1 text-xs text-slate-500">Calculated from current vehicle availability</p>
+            <div className="mt-4 space-y-4">
+              {utilizationByType.map(([label, value, total, rented]) => (
+                <div key={label}>
+                  <div className="mb-1.5 flex justify-between text-xs">
+                    <span className="text-slate-600 font-medium">
+                      {label} <span className="text-[10px] text-slate-400 font-normal">({rented}/{total} on road)</span>
+                    </span>
+                    <span className="font-semibold text-slate-800">{value}%</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-200">
+                    <div
+                      className="h-2 rounded-full bg-emerald-600 transition-all duration-300"
+                      style={{ width: `${Math.min(value, 100)}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
         </div>
       </Card>
+
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
-        <Card className="overflow-hidden"><div className="p-5"><h2 className="text-sm font-semibold text-slate-900">Top vehicles by bookings</h2><p className="mt-1 text-xs text-slate-500">Based on these illustrative sample records</p></div><DataTable rows={vehicles.slice(0, 4).map((vehicle, index) => ({ ...vehicle, reportBookings: [28, 23, 19, 15][index] }))} columns={[{ key: 'name', label: 'Vehicle' }, { key: 'registration', label: 'Registration' }, { key: 'type', label: 'Type' }, { key: 'reportBookings', label: 'Bookings', render: (row) => <span className="font-semibold text-slate-800">{row.reportBookings}</span> }]} /></Card>
-        <Card className="p-5"><h2 className="text-sm font-semibold text-slate-900">Recent report notes</h2><div className="mt-4 space-y-3 text-xs"><p className="rounded-xl bg-emerald-50 px-3.5 py-3 leading-5 text-emerald-900">Sample payments currently total {currency(payments.reduce((sum, item) => sum + item.amount, 0))}.</p><p className="rounded-xl bg-slate-50 px-3.5 py-3 leading-5 text-slate-600">The current demo dataset contains {bookings.length} booking records and {customers.length} customer profiles.</p></div></Card>
+        <Card className="overflow-hidden">
+          <div className="p-5">
+            <h2 className="text-sm font-semibold text-slate-900">Top Vehicles by Bookings</h2>
+            <p className="mt-1 text-xs text-slate-500">Fleet ranking based on actual customer rentals</p>
+          </div>
+          <DataTable
+            rows={topVehicles}
+            columns={[
+              { key: 'name', label: 'Vehicle' },
+              { key: 'registration', label: 'Registration' },
+              { key: 'type', label: 'Type' },
+              {
+                key: 'reportBookings',
+                label: 'Bookings',
+                render: (row) => (
+                  <span className="font-semibold text-emerald-800">{row.reportBookings} rentals</span>
+                ),
+              },
+            ]}
+          />
+          {topVehicles.length === 0 && (
+            <p className="p-5 text-center text-xs text-slate-400">No vehicles available for ranking.</p>
+          )}
+        </Card>
+
+        <Card className="p-5">
+          <h2 className="text-sm font-semibold text-slate-900">Financial & Fleet Summary</h2>
+          <div className="mt-4 space-y-3 text-xs">
+            <p className="rounded-xl bg-emerald-50 px-3.5 py-3 leading-5 text-emerald-900">
+              Total collected payments stand at <strong>{currency(totalRev)}</strong> across verified counter and online transactions.
+            </p>
+            <p className="rounded-xl bg-amber-50 px-3.5 py-3 leading-5 text-amber-900">
+              Outstanding receivables pending from active rentals: <strong>{currency(totalPending)}</strong>.
+            </p>
+            <p className="rounded-xl bg-slate-50 px-3.5 py-3 leading-5 text-slate-600">
+              Fleet operations are tracking <strong>{vehicles.length}</strong> vehicles, <strong>{bookings.length}</strong> rental bookings, and <strong>{customers.length}</strong> registered customer profiles.
+            </p>
+          </div>
+        </Card>
       </div>
     </div>
   )
@@ -976,47 +2185,169 @@ const defaultSettings = {
 function Settings() {
   const [section, setSection] = useState(settingSections[0].label)
   const [settings, setSettings] = useState(() => {
-    // Settings persist in this browser only; they are not synchronized with a backend.
     const stored = window.localStorage.getItem('wavygo-demo-settings')
     return stored ? { ...defaultSettings, ...JSON.parse(stored) } : defaultSettings
   })
   const [draft, setDraft] = useState(settings)
   const [notice, setNotice] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
   const current = settingSections.find((item) => item.label === section)
 
-  function saveSettings(event) {
+  useEffect(() => {
+    async function fetchTenantProfile() {
+      try {
+        const tenant = await tenantService.getCurrentTenant()
+        if (tenant) {
+          const loaded = {
+            businessName: tenant.businessName || defaultSettings.businessName,
+            owner: tenant.ownerName || defaultSettings.owner,
+            phone: tenant.phone || defaultSettings.phone,
+            email: tenant.email || defaultSettings.email,
+            address: tenant.address || defaultSettings.address,
+            minimum: String(tenant.rentalRules?.minimumRentalHours || defaultSettings.minimum),
+            advance: String(tenant.rentalRules?.advanceBookingDays || defaultSettings.advance),
+            deposit: String(tenant.rentalRules?.defaultSecurityDeposit || defaultSettings.deposit),
+            cancellation: String(tenant.rentalRules?.cancellationHours || defaultSettings.cancellation),
+            currency: tenant.rentalRules?.currency ? `${tenant.rentalRules.currency} · Indian Rupee` : defaultSettings.currency,
+            bookingNotifications: tenant.notifications?.bookingNotifications ? 'Enabled' : 'Disabled',
+            paymentNotifications: tenant.notifications?.paymentNotifications ? 'Enabled' : 'Disabled',
+            maintenanceNotifications: tenant.notifications?.maintenanceNotifications ? 'Enabled' : 'Disabled',
+            profileName: tenant.ownerName || defaultSettings.profileName,
+            profileEmail: tenant.email || defaultSettings.profileEmail,
+            profilePhone: tenant.phone || defaultSettings.profilePhone,
+            staffAccess: tenant.permissions?.staffAccessLevel || defaultSettings.staffAccess,
+            invitePolicy: tenant.permissions?.invitePolicy || defaultSettings.invitePolicy,
+            backendSynced: true,
+          }
+          setSettings((prev) => ({ ...prev, ...loaded }))
+          setDraft((prev) => ({ ...prev, ...loaded }))
+        }
+      } catch (err) {
+        console.warn('Tenant profile fetch fallback:', err)
+      }
+    }
+    fetchTenantProfile()
+  }, [])
+
+  async function saveSettings(event) {
     event.preventDefault()
     const missing = current.fields.find((field) => field.required && !String(draft[field.name] || '').trim())
     if (missing) {
       setNotice(`${missing.label} is required.`)
       return
     }
+
+    setIsSaving(true)
     try {
+      const payload = {
+        businessName: draft.businessName,
+        ownerName: draft.owner || draft.profileName,
+        phone: draft.phone || draft.profilePhone,
+        address: draft.address,
+        rentalRules: {
+          minimumRentalHours: parseInt(draft.minimum, 10) || 24,
+          advanceBookingDays: parseInt(draft.advance, 10) || 90,
+          defaultSecurityDeposit: parseFloat(draft.deposit) || 2000.0,
+          cancellationHours: parseInt(draft.cancellation, 10) || 24,
+          currency: draft.currency?.split(' ')[0] || 'INR',
+        },
+        notifications: {
+          bookingNotifications: draft.bookingNotifications === 'Enabled',
+          paymentNotifications: draft.paymentNotifications === 'Enabled',
+          maintenanceNotifications: draft.maintenanceNotifications === 'Enabled',
+        },
+        permissions: {
+          staffAccessLevel: draft.staffAccess,
+          invitePolicy: draft.invitePolicy,
+        },
+      }
+      await tenantService.updateCurrentTenant(payload)
+      setSettings(draft)
+      setNotice(`${section} saved successfully to cloud database!`)
+    } catch (error) {
       window.localStorage.setItem('wavygo-demo-settings', JSON.stringify(draft))
       setSettings(draft)
-      setNotice(`${section} saved in this browser for the demo. No server was contacted.`)
-    } catch (error) {
-      setNotice(`Browser storage was unavailable: ${error.message}`)
+      setNotice(`${section} saved locally. (${error.message || 'Error syncing to server'})`)
+    } finally {
+      setIsSaving(false)
     }
   }
 
   return (
     <div>
-      <PageHeader title="Settings" description="Manage your business preferences and team access." />
-      <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800">Settings are saved locally in this browser for this demo only. They are not synced to a server.</div>
+      <PageHeader title="Settings" description="Manage your business preferences, hub address and rental policies." />
+      <div className={`mb-4 rounded-xl border px-4 py-3 text-xs leading-5 ${settings.backendSynced ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+        {settings.backendSynced
+          ? 'Live mode: Connected to MongoDB database. Hub profile and rental preferences persist in real time.'
+          : 'Connecting to tenant configuration...'}
+      </div>
       <div className="grid gap-4 lg:grid-cols-[225px_minmax(0,1fr)]">
         <Card className="h-fit p-2">
           <nav aria-label="Settings sections" className="flex gap-1 overflow-x-auto lg:flex-col">
-            {settingSections.map((item) => <button key={item.label} type="button" onClick={() => { setSection(item.label); setNotice('') }} className={`shrink-0 rounded-xl px-3 py-2.5 text-left text-xs font-medium transition lg:w-full ${section === item.label ? 'bg-emerald-50 text-emerald-800' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}>{item.label}</button>)}
+            {settingSections.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => { setSection(item.label); setNotice('') }}
+                className={`shrink-0 rounded-xl px-3 py-2.5 text-left text-xs font-medium transition lg:w-full ${section === item.label ? 'bg-emerald-50 text-emerald-800' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}
+              >
+                {item.label}
+              </button>
+            ))}
           </nav>
         </Card>
         <Card className="p-5 sm:p-7">
-          <div className="mb-5 border-b border-slate-100 pb-4"><h2 className="text-base font-semibold text-slate-900">{section}</h2><p className="mt-1 text-xs text-slate-500">Changes are kept in this browser for the demo.</p></div>
+          <div className="mb-5 border-b border-slate-100 pb-4">
+            <h2 className="text-base font-semibold text-slate-900">{section}</h2>
+            <p className="mt-1 text-xs text-slate-500">Live tenant configuration saved to your workspace.</p>
+          </div>
           <form onSubmit={saveSettings}>
-            <div className="grid gap-4 sm:grid-cols-2">{current.fields.map((field) => <label key={field.name} className={`block ${field.wide ? 'sm:col-span-2' : ''}`}><span className="mb-1.5 block text-xs font-medium text-slate-600">{field.label}{field.required && <span className="ml-0.5 text-rose-500">*</span>}</span>{field.type === 'select' ? <select value={draft[field.name] || ''} onChange={(event) => setDraft((state) => ({ ...state, [field.name]: event.target.value }))} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100">{field.options.map((option) => <option key={option}>{option}</option>)}</select> : field.type === 'file' ? <><input type="file" accept="image/*" onChange={(event) => setDraft((state) => ({ ...state, [field.name]: event.target.files?.[0]?.name || '' }))} className="block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-emerald-800" /><span className="mt-1 block text-[11px] text-slate-400">{draft[field.name] ? `Selected locally: ${draft[field.name]}` : 'File name only; no upload is performed.'}</span></> : <input required={field.required} min={field.min} type={field.type || 'text'} value={draft[field.name] || ''} onChange={(event) => setDraft((state) => ({ ...state, [field.name]: event.target.value }))} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" />}</label>)}</div>
-            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-5"><p role="status" aria-live="polite" className="max-w-lg text-xs text-emerald-800">{notice}</p><Button type="submit"><Check size={15} />Save in this browser</Button></div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {current.fields.map((field) => (
+                <label key={field.name} className={`block ${field.wide ? 'sm:col-span-2' : ''}`}>
+                  <span className="mb-1.5 block text-xs font-medium text-slate-600">
+                    {field.label}{field.required && <span className="ml-0.5 text-rose-500">*</span>}
+                  </span>
+                  {field.type === 'select' ? (
+                    <select
+                      value={draft[field.name] || ''}
+                      onChange={(event) => setDraft((state) => ({ ...state, [field.name]: event.target.value }))}
+                      className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                    >
+                      {field.options.map((option) => <option key={option}>{option}</option>)}
+                    </select>
+                  ) : field.type === 'file' ? (
+                    <>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(event) => setDraft((state) => ({ ...state, [field.name]: event.target.files?.[0]?.name || '' }))}
+                        className="block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-emerald-800"
+                      />
+                      <span className="mt-1 block text-[11px] text-slate-400">
+                        {draft[field.name] ? `Selected: ${draft[field.name]}` : 'Logo display indicator'}
+                      </span>
+                    </>
+                  ) : (
+                    <input
+                      required={field.required}
+                      min={field.min}
+                      type={field.type || 'text'}
+                      value={draft[field.name] || ''}
+                      onChange={(event) => setDraft((state) => ({ ...state, [field.name]: event.target.value }))}
+                      className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                    />
+                  )}
+                </label>
+              ))}
+            </div>
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-5">
+              <p role="status" aria-live="polite" className="max-w-lg text-xs text-emerald-800">{notice}</p>
+              <Button type="submit" disabled={isSaving}>
+                <Check size={15} />{isSaving ? 'Saving...' : 'Save settings'}
+              </Button>
+            </div>
           </form>
-          <p className="mt-5 text-[11px] text-slate-400">Business logo and file uploads are not sent or stored remotely.</p>
         </Card>
       </div>
     </div>

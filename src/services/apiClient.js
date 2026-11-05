@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8001/api/v1'
 
 /**
  * Universal API request wrapper
@@ -8,8 +8,16 @@ export async function apiFetch(endpoint, options = {}) {
     ? endpoint
     : `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`
 
+  const token =
+    typeof localStorage !== 'undefined'
+      ? localStorage.getItem('access_token') || sessionStorage.getItem('access_token')
+      : null
+
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData
+
   const headers = {
-    'Content-Type': 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(options.headers || {}),
   }
 
@@ -19,6 +27,16 @@ export async function apiFetch(endpoint, options = {}) {
   })
 
   if (!response.ok) {
+    if (response.status === 401) {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem('access_token')
+      }
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.removeItem('access_token')
+        sessionStorage.removeItem('wavygo-demo-access')
+      }
+    }
+
     let errorDetail = `Request failed with status ${response.status}`
     try {
       const errJson = await response.json()
@@ -33,6 +51,10 @@ export async function apiFetch(endpoint, options = {}) {
     const error = new Error(errorDetail)
     error.status = response.status
     throw error
+  }
+
+  if (response.status === 204) {
+    return null
   }
 
   return response.json()

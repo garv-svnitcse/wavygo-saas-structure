@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import time
 from typing import Optional, List, Dict, Any
 from fastapi import UploadFile
@@ -166,7 +166,7 @@ class DocumentService:
             # If Cloudinary upload fails, raise clean error
             raise RuntimeError(f"Cloudinary upload failed: {str(e)}")
 
-        now_dt = datetime.utcnow()
+        now_dt = datetime.now(timezone.utc)
         now_str = now_dt.isoformat()
         date_formatted = now_dt.strftime("%b %d, %Y")
         doc_id = f"DC-{int(time.time() * 1000) % 10000:04d}"
@@ -194,7 +194,7 @@ class DocumentService:
         db = self._get_db()
         if db is not None:
             try:
-                db["documents"].insert_one({**record, "_id": doc_id})
+                db["documents"].replace_one({"id": doc_id}, {**record, "_id": doc_id}, upsert=True)
             except Exception:
                 pass
 
@@ -263,7 +263,7 @@ class DocumentService:
         db = self._get_db()
         if db is not None:
             try:
-                doc = db["documents"].find_one({"id": doc_id})
+                doc = db["documents"].find_one({"$or": [{"id": doc_id}, {"_id": doc_id}]})
                 if doc:
                     doc.pop("_id", None)
                     return DocumentResponse(**doc)
@@ -279,7 +279,7 @@ class DocumentService:
         if not existing:
             return None
 
-        update_dict: Dict[str, Any] = {"updated_at": datetime.utcnow().isoformat()}
+        update_dict: Dict[str, Any] = {"updated_at": datetime.now(timezone.utc).isoformat()}
         if payload.name is not None:
             update_dict["name"] = payload.name
         if payload.category is not None:
@@ -298,15 +298,14 @@ class DocumentService:
         db = self._get_db()
         if db is not None:
             try:
-                db["documents"].update_one({"id": doc_id}, {"$set": update_dict})
+                db["documents"].update_one({"$or": [{"id": doc_id}, {"_id": doc_id}]}, {"$set": update_dict})
             except Exception:
                 pass
 
         if doc_id in self._memory_documents:
             self._memory_documents[doc_id].update(update_dict)
-            return DocumentResponse(**self._memory_documents[doc_id])
 
-        return self.get_document(doc_id)
+        return self.get_document(doc_id) or DocumentResponse(**{**existing.dict(), **update_dict})
 
     def delete_document(self, doc_id: str) -> bool:
         doc = self.get_document(doc_id)
@@ -324,7 +323,7 @@ class DocumentService:
         db = self._get_db()
         if db is not None:
             try:
-                db["documents"].delete_one({"id": doc_id})
+                db["documents"].delete_one({"$or": [{"id": doc_id}, {"_id": doc_id}]})
             except Exception:
                 pass
 

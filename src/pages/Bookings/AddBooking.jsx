@@ -39,7 +39,7 @@ function AddBooking() {
   const navigate = useNavigate()
   const location = useLocation()
   const offlineMode = Boolean(location.state?.offline)
-  const { vehicles, customers, addRecord } = useDemoData()
+  const { vehicles, customers, addRecord, syncOfflineBookings, syncVehicles, syncCustomers } = useDemoData()
   const today = formatDate(new Date())
   const tomorrow = formatDate(new Date(Date.now() + 86_400_000))
 
@@ -209,7 +209,10 @@ function AddBooking() {
           })
         }
 
-        addRecord('bookings', bookingRecord)
+        if (syncOfflineBookings) await syncOfflineBookings()
+        if (syncVehicles) await syncVehicles()
+        if (customerMode === 'new' && syncCustomers) await syncCustomers()
+
         setConfirmation({
           ...bookingRecord,
           vehicleName: selectedVehicle.name,

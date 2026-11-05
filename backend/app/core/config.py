@@ -18,6 +18,20 @@ class Settings(BaseSettings):
     cloudinary_api_key: Optional[str] = None
     cloudinary_api_secret: Optional[str] = None
 
+    # Redis / Upstash credentials
+    redis_url: Optional[str] = None
+    redis_host: Optional[str] = None
+    redis_port: int = 6379
+    redis_username: str = "default"
+    redis_password: Optional[str] = None
+    redis_tls: bool = True
+    upstash_redis_url: Optional[str] = None
+
+    # Brevo credentials
+    brevo_api_key: Optional[str] = None
+    brevo_sender_email: Optional[str] = None
+    brevo_sender_name: Optional[str] = None
+
     model_config = SettingsConfigDict(
         env_file=(".env", "backend/.env"),
         env_file_encoding="utf-8",
