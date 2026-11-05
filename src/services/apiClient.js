@@ -1,8 +1,13 @@
-const API_BASE_URL =
+const rawApiUrl =
   import.meta.env.API_URL ||
   import.meta.env.VITE_API_URL ||
   import.meta.env.VITE_API_BASE_URL ||
   'http://127.0.0.1:8001/api/v1'
+
+const cleanApiUrl = String(rawApiUrl).trim().replace(/\/+$/, '')
+const API_BASE_URL = cleanApiUrl.endsWith('/api/v1')
+  ? cleanApiUrl
+  : `${cleanApiUrl}/api/v1`
 
 /**
  * Universal API request wrapper
