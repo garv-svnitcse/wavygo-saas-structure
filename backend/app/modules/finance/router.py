@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 
+from app.modules.auth.security import get_optional_vendor
 from app.modules.finance.schemas import (
     ExpenseCreate,
     ExpenseUpdate,
@@ -16,15 +17,21 @@ from app.modules.finance.service import finance_service
 router = APIRouter()
 
 
+def _get_tenant_id(request: Request) -> Optional[str]:
+    vendor = get_optional_vendor(request)
+    return str(vendor["_id"]) if vendor and "_id" in vendor else None
+
+
 @router.get(
     "/overview",
     response_model=FinanceOverviewResponse,
     summary="Get overall finance summary & metrics",
     description="Returns verified collected revenue, online/offline breakdown, operating expenses, maintenance costs, net profit, comparison chart, and expense breakdown.",
 )
-def get_finance_overview() -> FinanceOverviewResponse:
+def get_finance_overview(request: Request) -> FinanceOverviewResponse:
     try:
-        return finance_service.get_overview()
+        tenant_id = _get_tenant_id(request)
+        return finance_service.get_overview(tenant_id=tenant_id)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -38,9 +45,10 @@ def get_finance_overview() -> FinanceOverviewResponse:
     summary="Get cash flow statement",
     description="Returns aggregate cash inflows, outflows, and net cashflow broken down by payment method (UPI, Cash, Bank Transfer, Card).",
 )
-def get_cashflow() -> CashflowResponse:
+def get_cashflow(request: Request) -> CashflowResponse:
     try:
-        return finance_service.get_cashflow()
+        tenant_id = _get_tenant_id(request)
+        return finance_service.get_cashflow(tenant_id=tenant_id)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -54,9 +62,10 @@ def get_cashflow() -> CashflowResponse:
     summary="Get Profit & Loss (P&L) statement",
     description="Returns gross rental income, operational breakdown (rent, salaries, fuel, maintenance, insurance), net income, and operating margin.",
 )
-def get_pnl() -> PnLStatementResponse:
+def get_pnl(request: Request) -> PnLStatementResponse:
     try:
-        return finance_service.get_pnl()
+        tenant_id = _get_tenant_id(request)
+        return finance_service.get_pnl(tenant_id=tenant_id)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -68,16 +77,17 @@ def get_pnl() -> PnLStatementResponse:
     "/expenses",
     response_model=ExpenseResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Record a business expense",
-    description="Create a new expense entry (hub rent, staff salary, spare parts, fuel, utilities, insurance).",
+    summary="Create expense entry",
+    description="Add an operational or facility expense record (Rent, Salary, Fuel, Parts, Marketing, etc.).",
 )
-def create_expense(payload: ExpenseCreate) -> ExpenseResponse:
+def create_expense(payload: ExpenseCreate, request: Request) -> ExpenseResponse:
     try:
-        return finance_service.create_expense(payload)
+        tenant_id = _get_tenant_id(request)
+        return finance_service.create_expense(payload, tenant_id=tenant_id)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to record expense: {str(exc)}",
+            detail=f"Failed to create expense: {str(exc)}",
         )
 
 
@@ -88,18 +98,21 @@ def create_expense(payload: ExpenseCreate) -> ExpenseResponse:
     description="Retrieve all operational expenses with optional filtering by category, status, and search query.",
 )
 def list_expenses(
+    request: Request,
     category: Optional[str] = Query(None, description="Filter by category (Rent & Operations, Staff Salaries, Maintenance, Fuel, Utilities, etc.)"),
     status: Optional[str] = Query(None, description="Filter by status (Paid, Pending)"),
     query: Optional[str] = Query(None, description="Search by title, payee, or reference"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
 ) -> List[ExpenseResponse]:
+    tenant_id = _get_tenant_id(request)
     return finance_service.list_expenses(
         category=category,
         status=status,
         query=query,
         skip=skip,
         limit=limit,
+        tenant_id=tenant_id,
     )
 
 
@@ -108,7 +121,7 @@ def list_expenses(
     response_model=ExpenseResponse,
     summary="Get expense details",
 )
-def get_expense(expense_id: str) -> ExpenseResponse:
+def get_expense(expense_id: str, request: Request) -> ExpenseResponse:
     expense = finance_service.get_expense(expense_id)
     if not expense:
         raise HTTPException(
@@ -123,7 +136,7 @@ def get_expense(expense_id: str) -> ExpenseResponse:
     response_model=ExpenseResponse,
     summary="Update expense",
 )
-def update_expense(expense_id: str, payload: ExpenseUpdate) -> ExpenseResponse:
+def update_expense(expense_id: str, payload: ExpenseUpdate, request: Request) -> ExpenseResponse:
     updated = finance_service.update_expense(expense_id, payload)
     if not updated:
         raise HTTPException(
@@ -137,7 +150,7 @@ def update_expense(expense_id: str, payload: ExpenseUpdate) -> ExpenseResponse:
     "/expenses/{expense_id}",
     summary="Delete expense",
 )
-def delete_expense(expense_id: str) -> dict:
+def delete_expense(expense_id: str, request: Request) -> dict:
     success = finance_service.delete_expense(expense_id)
     if not success:
         raise HTTPException(

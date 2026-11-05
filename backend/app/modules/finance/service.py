@@ -123,7 +123,7 @@ class FinanceService:
         for item in initial:
             self._memory_expenses[item["id"]] = item
 
-    def create_expense(self, payload: ExpenseCreate) -> ExpenseResponse:
+    def create_expense(self, payload: ExpenseCreate, tenant_id: Optional[str] = None) -> ExpenseResponse:
         now_dt = datetime.now(timezone.utc)
         now_str = now_dt.isoformat()
         date_formatted = payload.date or now_dt.strftime("%b %d, %Y")
@@ -140,6 +140,8 @@ class FinanceService:
             "reference": payload.reference.strip() if payload.reference else None,
             "status": payload.status.strip() if payload.status else "Paid",
             "notes": payload.notes.strip() if payload.notes else None,
+            "tenant_id": tenant_id,
+            "vendor_id": tenant_id,
             "created_at": now_str,
             "updated_at": now_str,
         }
@@ -163,6 +165,7 @@ class FinanceService:
         query: Optional[str] = None,
         skip: int = 0,
         limit: int = 50,
+        tenant_id: Optional[str] = None,
     ) -> List[ExpenseResponse]:
         results: List[Dict[str, Any]] = []
 
@@ -170,19 +173,28 @@ class FinanceService:
         if db is not None:
             try:
                 mongo_filter: Dict[str, Any] = {}
+                if tenant_id:
+                    mongo_filter["$or"] = [
+                        {"tenant_id": tenant_id},
+                        {"vendor_id": tenant_id},
+                    ]
                 if category and category.lower() != "all":
                     mongo_filter["category"] = category
                 if status and status.lower() != "all":
                     mongo_filter["status"] = status
                 if query:
                     regex_q = {"$regex": query, "$options": "i"}
-                    mongo_filter["$or"] = [
+                    query_cond = [
                         {"id": regex_q},
                         {"category": regex_q},
                         {"title": regex_q},
                         {"payee": regex_q},
                         {"reference": regex_q},
                     ]
+                    if "$or" in mongo_filter:
+                        mongo_filter["$and"] = [{"$or": mongo_filter.pop("$or")}, {"$or": query_cond}]
+                    else:
+                        mongo_filter["$or"] = query_cond
 
                 cursor = db["expenses"].find(mongo_filter).sort("created_at", -1).skip(skip).limit(limit)
                 for doc in cursor:
@@ -195,6 +207,8 @@ class FinanceService:
         # Fallback to in-memory store
         if not results:
             for item in sorted(self._memory_expenses.values(), key=lambda x: x.get("created_at", ""), reverse=True):
+                if tenant_id and item.get("tenant_id") and item.get("tenant_id") != tenant_id:
+                    continue
                 if category and category.lower() != "all" and item.get("category", "").lower() != category.lower():
                     continue
                 if status and status.lower() != "all" and item.get("status", "").lower() != status.lower():
@@ -278,10 +292,10 @@ class FinanceService:
             return True
         return False
 
-    def get_overview(self) -> FinanceOverviewResponse:
+    def get_overview(self, tenant_id: Optional[str] = None) -> FinanceOverviewResponse:
         # 1. Fetch live payments data
         from app.modules.payments.service import payment_service
-        all_payments = payment_service.list_payments(limit=1000)
+        all_payments = payment_service.list_payments(limit=1000, tenant_id=tenant_id)
         valid_payments = [p for p in all_payments if p.status != "Refunded"]
 
         total_rev = sum(p.amount for p in valid_payments)
@@ -292,22 +306,22 @@ class FinanceService:
         pending_total = 0.0
         try:
             from app.modules.bookings.service import booking_service
-            bookings = booking_service.list_bookings(limit=500)
+            bookings = booking_service.list_bookings(limit=500, tenant_id=tenant_id)
             pending_total = sum(b.pending for b in bookings)
         except Exception:
-            pending_total = 18450.0
+            pending_total = 0.0
 
         # 3. Fetch fleet maintenance costs
         maintenance_costs = 0.0
         try:
             from app.modules.maintenance.service import maintenance_service
-            maint_records = maintenance_service.list_maintenance(limit=500)
+            maint_records = maintenance_service.list_maintenance(limit=500, tenant_id=tenant_id)
             maintenance_costs = sum(m.cost for m in maint_records)
         except Exception:
-            maintenance_costs = 18450.0
+            maintenance_costs = 0.0
 
         # 4. Fetch operating expenses
-        expenses = self.list_expenses(limit=1000)
+        expenses = self.list_expenses(limit=1000, tenant_id=tenant_id)
         operating_expenses = sum(e.amount for e in expenses if e.category != "Maintenance")
         total_expenses = operating_expenses + maintenance_costs
 
@@ -417,10 +431,10 @@ class FinanceService:
             total_expense_records=len(expenses),
         )
 
-    def get_cashflow(self) -> CashflowResponse:
+    def get_cashflow(self, tenant_id: Optional[str] = None) -> CashflowResponse:
         from app.modules.payments.service import payment_service
-        payments = payment_service.list_payments(limit=1000)
-        expenses = self.list_expenses(limit=1000)
+        payments = payment_service.list_payments(limit=1000, tenant_id=tenant_id)
+        expenses = self.list_expenses(limit=1000, tenant_id=tenant_id)
 
         methods = ["UPI", "Cash", "Card", "Bank Transfer"]
         method_map: Dict[str, CashflowMethodSummary] = {
@@ -451,9 +465,9 @@ class FinanceService:
             by_method=method_map,
         )
 
-    def get_pnl(self) -> PnLStatementResponse:
-        overview = self.get_overview()
-        expenses = self.list_expenses(limit=1000)
+    def get_pnl(self, tenant_id: Optional[str] = None) -> PnLStatementResponse:
+        overview = self.get_overview(tenant_id=tenant_id)
+        expenses = self.list_expenses(limit=1000, tenant_id=tenant_id)
 
         # Categorize operational expenses
         hub_rent = sum(e.amount for e in expenses if "rent" in e.category.lower() or "hub" in e.category.lower())

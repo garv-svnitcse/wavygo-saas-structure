@@ -143,6 +143,7 @@ class DocumentService:
         vehicle_name: Optional[str] = None,
         status: str = "In review",
         notes: Optional[str] = None,
+        tenant_id: Optional[str] = None,
     ) -> DocumentResponse:
         self._init_cloudinary()
 
@@ -186,6 +187,8 @@ class DocumentService:
             "status": status,
             "date": date_formatted,
             "notes": notes.strip() if notes else None,
+            "tenant_id": tenant_id,
+            "vendor_id": tenant_id,
             "created_at": now_str,
             "updated_at": now_str,
         }
@@ -211,6 +214,7 @@ class DocumentService:
         query: Optional[str] = None,
         skip: int = 0,
         limit: int = 50,
+        tenant_id: Optional[str] = None,
     ) -> List[DocumentResponse]:
         results: List[Dict[str, Any]] = []
 
@@ -218,6 +222,11 @@ class DocumentService:
         if db is not None:
             try:
                 mongo_filter: Dict[str, Any] = {}
+                if tenant_id:
+                    mongo_filter["$or"] = [
+                        {"tenant_id": tenant_id},
+                        {"vendor_id": tenant_id},
+                    ]
                 if scope and scope.lower() != "all":
                     mongo_filter["scope"] = scope.capitalize()
                 if category and category.lower() != "all":
@@ -226,12 +235,16 @@ class DocumentService:
                     mongo_filter["status"] = status
                 if query:
                     regex_q = {"$regex": query, "$options": "i"}
-                    mongo_filter["$or"] = [
+                    q_cond = [
                         {"name": regex_q},
                         {"category": regex_q},
                         {"id": regex_q},
                         {"vehicle_name": regex_q},
                     ]
+                    if "$or" in mongo_filter:
+                        mongo_filter["$and"] = [{"$or": mongo_filter.pop("$or")}, {"$or": q_cond}]
+                    else:
+                        mongo_filter["$or"] = q_cond
 
                 cursor = db["documents"].find(mongo_filter).sort("created_at", -1).skip(skip).limit(limit)
                 for doc in cursor:
@@ -243,6 +256,8 @@ class DocumentService:
         # Fallback to in-memory store if DB has no records or DB is unreachable
         if not results:
             for d in sorted(self._memory_documents.values(), key=lambda x: x.get("created_at", ""), reverse=True):
+                if tenant_id and d.get("tenant_id") and d.get("tenant_id") != tenant_id:
+                    continue
                 if scope and scope.lower() != "all" and d.get("scope", "").lower() != scope.lower():
                     continue
                 if category and category.lower() != "all" and d.get("category", "").lower() != category.lower():
@@ -259,11 +274,14 @@ class DocumentService:
 
         return [DocumentResponse(**item) for item in results]
 
-    def get_document(self, doc_id: str) -> Optional[DocumentResponse]:
+    def get_document(self, doc_id: str, tenant_id: Optional[str] = None) -> Optional[DocumentResponse]:
         db = self._get_db()
         if db is not None:
             try:
-                doc = db["documents"].find_one({"$or": [{"id": doc_id}, {"_id": doc_id}]})
+                filt: dict[str, Any] = {"$or": [{"id": doc_id}, {"_id": doc_id}]}
+                if tenant_id:
+                    filt = {"$and": [filt, {"$or": [{"tenant_id": tenant_id}, {"vendor_id": tenant_id}, {"tenant_id": None}, {"vendor_id": None}]}]}
+                doc = db["documents"].find_one(filt)
                 if doc:
                     doc.pop("_id", None)
                     return DocumentResponse(**doc)
@@ -271,11 +289,14 @@ class DocumentService:
                 pass
 
         if doc_id in self._memory_documents:
-            return DocumentResponse(**self._memory_documents[doc_id])
+            d = self._memory_documents[doc_id]
+            if tenant_id and d.get("tenant_id") and d.get("tenant_id") != tenant_id:
+                return None
+            return DocumentResponse(**d)
         return None
 
-    def update_document(self, doc_id: str, payload: DocumentUpdate) -> Optional[DocumentResponse]:
-        existing = self.get_document(doc_id)
+    def update_document(self, doc_id: str, payload: DocumentUpdate, tenant_id: Optional[str] = None) -> Optional[DocumentResponse]:
+        existing = self.get_document(doc_id, tenant_id=tenant_id)
         if not existing:
             return None
 

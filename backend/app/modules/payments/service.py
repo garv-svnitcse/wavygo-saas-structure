@@ -92,7 +92,7 @@ class PaymentService:
         for item in initial:
             self._memory_payments[item["id"]] = item
 
-    def record_payment(self, payload: PaymentCreate) -> PaymentResponse:
+    def record_payment(self, payload: PaymentCreate, tenant_id: Optional[str] = None) -> PaymentResponse:
         now_dt = datetime.now(timezone.utc)
         now_str = now_dt.isoformat()
         date_formatted = now_dt.strftime("%b %d, %Y")
@@ -103,7 +103,7 @@ class PaymentService:
         # Check booking details if available
         try:
             from app.modules.bookings.service import booking_service
-            booking = booking_service.get_booking(payload.booking_id)
+            booking = booking_service.get_booking(payload.booking_id, tenant_id=tenant_id)
             if booking:
                 if not payload.customer_name:
                     customer_name = booking.customer
@@ -116,6 +116,7 @@ class PaymentService:
                         method=payload.method,
                         notes=payload.notes,
                     ),
+                    tenant_id=tenant_id,
                 )
         except Exception:
             pass
@@ -130,6 +131,8 @@ class PaymentService:
             "status": payload.status or "Paid",
             "notes": payload.notes.strip() if payload.notes else None,
             "transaction_reference": payload.transaction_reference.strip() if payload.transaction_reference else None,
+            "tenant_id": tenant_id,
+            "vendor_id": tenant_id,
             "created_at": now_str,
             "updated_at": now_str,
         }
@@ -151,9 +154,11 @@ class PaymentService:
         self,
         status: Optional[str] = None,
         method: Optional[str] = None,
+        booking_id: Optional[str] = None,
         query: Optional[str] = None,
         skip: int = 0,
         limit: int = 50,
+        tenant_id: Optional[str] = None,
     ) -> List[PaymentResponse]:
         results: List[Dict[str, Any]] = []
 
@@ -161,19 +166,30 @@ class PaymentService:
         if db is not None:
             try:
                 mongo_filter: Dict[str, Any] = {}
+                if tenant_id:
+                    mongo_filter["$or"] = [
+                        {"tenant_id": tenant_id},
+                        {"vendor_id": tenant_id},
+                    ]
+                if booking_id:
+                    mongo_filter["booking"] = booking_id
                 if status and status.lower() != "all":
                     mongo_filter["status"] = status
                 if method and method.lower() != "all":
                     mongo_filter["method"] = method
                 if query:
                     regex_q = {"$regex": query, "$options": "i"}
-                    mongo_filter["$or"] = [
+                    query_cond = [
                         {"id": regex_q},
                         {"booking": regex_q},
                         {"customer": regex_q},
                         {"method": regex_q},
                         {"transaction_reference": regex_q},
                     ]
+                    if "$or" in mongo_filter:
+                        mongo_filter["$and"] = [{"$or": mongo_filter.pop("$or")}, {"$or": query_cond}]
+                    else:
+                        mongo_filter["$or"] = query_cond
 
                 cursor = db["payments"].find(mongo_filter).sort("created_at", -1).skip(skip).limit(limit)
                 for doc in cursor:
@@ -185,6 +201,10 @@ class PaymentService:
         # Fallback to in-memory store if DB has no records or DB is unreachable
         if not results:
             for p in sorted(self._memory_payments.values(), key=lambda x: x.get("created_at", ""), reverse=True):
+                if tenant_id and p.get("tenant_id") and p.get("tenant_id") != tenant_id:
+                    continue
+                if booking_id and p.get("booking") != booking_id:
+                    continue
                 if status and status.lower() != "all" and p.get("status", "").lower() != status.lower():
                     continue
                 if method and method.lower() != "all" and p.get("method", "").lower() != method.lower():
@@ -199,11 +219,14 @@ class PaymentService:
 
         return [PaymentResponse(**item) for item in results]
 
-    def get_payment(self, payment_id: str) -> Optional[PaymentResponse]:
+    def get_payment(self, payment_id: str, tenant_id: Optional[str] = None) -> Optional[PaymentResponse]:
         db = self._get_db()
         if db is not None:
             try:
-                doc = db["payments"].find_one({"$or": [{"id": payment_id}, {"_id": payment_id}]})
+                filt: dict[str, Any] = {"$or": [{"id": payment_id}, {"_id": payment_id}]}
+                if tenant_id:
+                    filt = {"$and": [filt, {"$or": [{"tenant_id": tenant_id}, {"vendor_id": tenant_id}, {"tenant_id": None}, {"vendor_id": None}]}]}
+                doc = db["payments"].find_one(filt)
                 if doc:
                     doc.pop("_id", None)
                     return PaymentResponse(**doc)
@@ -211,11 +234,14 @@ class PaymentService:
                 pass
 
         if payment_id in self._memory_payments:
-            return PaymentResponse(**self._memory_payments[payment_id])
+            p = self._memory_payments[payment_id]
+            if tenant_id and p.get("tenant_id") and p.get("tenant_id") != tenant_id:
+                return None
+            return PaymentResponse(**p)
         return None
 
-    def update_payment(self, payment_id: str, payload: PaymentUpdate) -> Optional[PaymentResponse]:
-        existing = self.get_payment(payment_id)
+    def update_payment(self, payment_id: str, payload: PaymentUpdate, tenant_id: Optional[str] = None) -> Optional[PaymentResponse]:
+        existing = self.get_payment(payment_id, tenant_id=tenant_id)
         if not existing:
             return None
 
@@ -241,8 +267,8 @@ class PaymentService:
         notes = f"Refunded: {reason}" if reason else "Refund processed"
         return self.update_payment(payment_id, PaymentUpdate(status="Refunded", notes=notes))
 
-    def get_stats(self) -> PaymentStatsResponse:
-        all_payments = self.list_payments(limit=1000)
+    def get_stats(self, tenant_id: Optional[str] = None) -> PaymentStatsResponse:
+        all_payments = self.list_payments(limit=1000, tenant_id=tenant_id)
         total_collected = sum(p.amount for p in all_payments if p.status != "Refunded")
         online_collected = sum(p.amount for p in all_payments if p.method in ["UPI", "Card", "Net Banking"] and p.status != "Refunded")
         offline_collected = sum(p.amount for p in all_payments if p.method in ["Cash", "Bank Transfer"] and p.status != "Refunded")
@@ -251,10 +277,10 @@ class PaymentService:
         pending_balance = 0.0
         try:
             from app.modules.bookings.service import booking_service
-            bookings = booking_service.list_bookings(limit=500)
+            bookings = booking_service.list_bookings(limit=500, tenant_id=tenant_id)
             pending_balance = sum(b.pending for b in bookings)
         except Exception:
-            pending_balance = 18450.0
+            pending_balance = 0.0
 
         return PaymentStatsResponse(
             total_collected=total_collected,

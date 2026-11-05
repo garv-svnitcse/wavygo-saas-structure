@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 
+from app.modules.auth.security import get_optional_vendor
 from app.modules.maintenance.schemas import (
     MaintenanceCreate,
     MaintenanceUpdate,
@@ -15,6 +16,11 @@ from app.modules.maintenance.service import maintenance_service
 router = APIRouter()
 
 
+def _get_tenant_id(request: Request) -> Optional[str]:
+    vendor = get_optional_vendor(request)
+    return str(vendor["_id"]) if vendor and "_id" in vendor else None
+
+
 @router.post(
     "",
     response_model=MaintenanceResponse,
@@ -22,9 +28,10 @@ router = APIRouter()
     summary="Add vehicle to maintenance",
     description="Records a new maintenance job with damage/flaw details, start date, cost, and sets vehicle status to Maintenance.",
 )
-def create_maintenance(payload: MaintenanceCreate) -> MaintenanceResponse:
+def create_maintenance(payload: MaintenanceCreate, request: Request) -> MaintenanceResponse:
     try:
-        return maintenance_service.create_maintenance(payload)
+        tenant_id = _get_tenant_id(request)
+        return maintenance_service.create_maintenance(payload, tenant_id=tenant_id)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -39,18 +46,21 @@ def create_maintenance(payload: MaintenanceCreate) -> MaintenanceResponse:
     description="Retrieve all maintenance records with optional status, vehicle, and search filters.",
 )
 def list_maintenance(
+    request: Request,
     status: Optional[str] = Query(None, description="Filter by status: Ongoing, Completed, or All"),
     vehicle_id: Optional[str] = Query(None, description="Filter by vehicle ID or name"),
     query: Optional[str] = Query(None, description="Search by ID, vehicle, type, mechanic or damage"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
 ) -> List[MaintenanceResponse]:
+    tenant_id = _get_tenant_id(request)
     return maintenance_service.list_maintenance(
         status=status,
         vehicle_id=vehicle_id,
         query=query,
         skip=skip,
         limit=limit,
+        tenant_id=tenant_id,
     )
 
 
@@ -58,79 +68,70 @@ def list_maintenance(
     "/stats",
     response_model=MaintenanceStatsResponse,
     summary="Get maintenance statistics",
-    description="Returns counts of open jobs, completed jobs, and total maintenance costs.",
+    description="Retrieve live count of vehicles currently in maintenance, ongoing jobs, and total spend.",
 )
-def get_stats() -> MaintenanceStatsResponse:
-    return maintenance_service.get_stats()
-
-
-@router.post(
-    "/vehicle-status",
-    summary="Update vehicle inspection / operational status",
-    description="Transition vehicle status between Rented, Under Review, Available, or Maintenance.",
-)
-def update_vehicle_status(payload: VehicleReviewStatusUpdate) -> Dict[str, Any]:
-    return maintenance_service.update_vehicle_review_status(payload)
+def get_maintenance_stats(request: Request) -> MaintenanceStatsResponse:
+    tenant_id = _get_tenant_id(request)
+    return maintenance_service.get_stats(tenant_id=tenant_id)
 
 
 @router.get(
-    "/{maintenance_id}",
+    "/{record_id}",
     response_model=MaintenanceResponse,
     summary="Get maintenance job details",
 )
-def get_maintenance(maintenance_id: str) -> MaintenanceResponse:
-    record = maintenance_service.get_maintenance(maintenance_id)
+def get_maintenance(record_id: str, request: Request) -> MaintenanceResponse:
+    tenant_id = _get_tenant_id(request)
+    record = maintenance_service.get_maintenance(record_id, tenant_id=tenant_id)
     if not record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Maintenance record '{maintenance_id}' not found.",
+            detail=f"Maintenance record '{record_id}' not found.",
         )
     return record
 
 
 @router.patch(
-    "/{maintenance_id}",
+    "/{record_id}",
     response_model=MaintenanceResponse,
     summary="Update maintenance record",
+    description="Update status (Ongoing to Completed), mechanic notes, cost, or completed date.",
 )
-def update_maintenance(maintenance_id: str, payload: MaintenanceUpdate) -> MaintenanceResponse:
-    updated = maintenance_service.update_maintenance(maintenance_id, payload)
+def update_maintenance(record_id: str, payload: MaintenanceUpdate, request: Request) -> MaintenanceResponse:
+    tenant_id = _get_tenant_id(request)
+    updated = maintenance_service.update_maintenance(record_id, payload, tenant_id=tenant_id)
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Maintenance record '{maintenance_id}' not found.",
+            detail=f"Maintenance record '{record_id}' not found.",
         )
     return updated
 
 
 @router.post(
-    "/{maintenance_id}/complete",
+    "/{record_id}/complete",
     response_model=MaintenanceResponse,
     summary="Complete maintenance job",
-    description="Marks the maintenance job as Completed and automatically releases the vehicle back to Available status.",
 )
-def complete_maintenance(
-    maintenance_id: str,
-    return_to_available: bool = Query(True, description="Release vehicle back to Available status"),
-) -> MaintenanceResponse:
-    record = maintenance_service.complete_maintenance(maintenance_id, return_to_available=return_to_available)
-    if not record:
+def complete_maintenance(record_id: str, request: Request) -> MaintenanceResponse:
+    res = maintenance_service.complete_maintenance(record_id)
+    if not res:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Maintenance record '{maintenance_id}' not found.",
+            detail=f"Maintenance record '{record_id}' not found.",
         )
-    return record
+    return res
 
 
-@router.delete(
-    "/{maintenance_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete maintenance record",
+@router.post("/vehicle-status", summary="Update vehicle review status (POST)")
+def update_vehicle_status_post(payload: VehicleReviewStatusUpdate, request: Request) -> Dict[str, Any]:
+    return maintenance_service.update_vehicle_review_status(payload)
+
+
+@router.patch(
+    "/vehicles/{vehicle_id}/review-status",
+    summary="Update vehicle RC / Fleet review status",
+    description="Updates vehicle review status (e.g., Pending review, Approved, Rejected).",
 )
-def delete_maintenance(maintenance_id: str) -> None:
-    success = maintenance_service.delete_maintenance(maintenance_id)
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Maintenance record '{maintenance_id}' not found.",
-        )
+def update_vehicle_review_status(vehicle_id: str, payload: VehicleReviewStatusUpdate, request: Request) -> Dict[str, Any]:
+    return maintenance_service.update_vehicle_review_status(vehicle_id, payload.status)

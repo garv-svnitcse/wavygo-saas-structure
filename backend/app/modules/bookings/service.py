@@ -50,7 +50,7 @@ class BookingService:
         except Exception:
             return f"{start_str} – {end_str}"
 
-    def create_offline_booking(self, payload: OfflineBookingCreate) -> OfflineBookingResponse:
+    def create_offline_booking(self, payload: OfflineBookingCreate, tenant_id: Optional[str] = None) -> OfflineBookingResponse:
         now_dt = datetime.now(timezone.utc)
         now_str = now_dt.isoformat()
         
@@ -136,6 +136,8 @@ class BookingService:
             "rental_details": rental_details,
             "payment_details": payment_details,
             "notes": payload.notes,
+            "tenant_id": tenant_id,
+            "vendor_id": tenant_id,
             "created_at": now_str,
             "updated_at": now_str,
         }
@@ -187,11 +189,19 @@ class BookingService:
         self._memory_bookings[booking_id] = record
         return OfflineBookingResponse.model_validate(record)
 
-    def get_booking(self, booking_id: str) -> Optional[OfflineBookingResponse]:
+    def get_booking(self, booking_id: str, tenant_id: Optional[str] = None) -> Optional[OfflineBookingResponse]:
         db = self._get_db()
         if db is not None:
             try:
-                doc = db["bookings"].find_one({"$or": [{"id": booking_id}, {"_id": booking_id}]})
+                filt: dict[str, Any] = {"$or": [{"id": booking_id}, {"_id": booking_id}]}
+                if tenant_id:
+                    filt = {
+                        "$and": [
+                            filt,
+                            {"$or": [{"tenant_id": tenant_id}, {"vendor_id": tenant_id}, {"tenant_id": None}, {"vendor_id": None}]},
+                        ]
+                    }
+                doc = db["bookings"].find_one(filt)
                 if doc:
                     doc["id"] = doc.get("id") or str(doc.get("_id"))
                     doc.pop("_id", None)
@@ -200,7 +210,10 @@ class BookingService:
                 logger.error("Failed to get booking from Mongo: %s", exc)
 
         if booking_id in self._memory_bookings:
-            return OfflineBookingResponse.model_validate(self._memory_bookings[booking_id])
+            b = self._memory_bookings[booking_id]
+            if tenant_id and b.get("tenant_id") and b.get("tenant_id") != tenant_id:
+                return None
+            return OfflineBookingResponse.model_validate(b)
         return None
 
     def list_bookings(
@@ -209,6 +222,7 @@ class BookingService:
         query: Optional[str] = None,
         skip: int = 0,
         limit: int = 50,
+        tenant_id: Optional[str] = None,
     ) -> List[OfflineBookingResponse]:
         results: List[Dict[str, Any]] = []
 
@@ -216,15 +230,24 @@ class BookingService:
         if db is not None:
             try:
                 mongo_filter: Dict[str, Any] = {}
+                if tenant_id:
+                    mongo_filter["$or"] = [
+                        {"tenant_id": tenant_id},
+                        {"vendor_id": tenant_id},
+                    ]
                 if status and status.lower() != "all":
                     mongo_filter["status"] = status
                 if query:
                     regex_q = {"$regex": query, "$options": "i"}
-                    mongo_filter["$or"] = [
+                    query_cond = [
                         {"id": regex_q},
                         {"customer": regex_q},
                         {"vehicle": regex_q},
                     ]
+                    if "$or" in mongo_filter:
+                        mongo_filter["$and"] = [{"$or": mongo_filter.pop("$or")}, {"$or": query_cond}]
+                    else:
+                        mongo_filter["$or"] = query_cond
                 cursor = db["bookings"].find(mongo_filter).sort("created_at", -1).skip(skip).limit(limit)
                 for doc in cursor:
                     doc["id"] = doc.get("id") or str(doc.get("_id"))
@@ -236,6 +259,8 @@ class BookingService:
         # Fallback to in-memory store if no results or Mongo unavailable
         if not results:
             for b in sorted(self._memory_bookings.values(), key=lambda x: x.get("created_at", ""), reverse=True):
+                if tenant_id and b.get("tenant_id") and b.get("tenant_id") != tenant_id:
+                    continue
                 if status and status.lower() != "all" and b.get("status") != status:
                     continue
                 if query:
@@ -248,8 +273,8 @@ class BookingService:
 
         return [OfflineBookingResponse.model_validate(item) for item in results]
 
-    def update_booking(self, booking_id: str, payload: OfflineBookingUpdate) -> Optional[OfflineBookingResponse]:
-        booking = self.get_booking(booking_id)
+    def update_booking(self, booking_id: str, payload: OfflineBookingUpdate, tenant_id: Optional[str] = None) -> Optional[OfflineBookingResponse]:
+        booking = self.get_booking(booking_id, tenant_id=tenant_id)
         if not booking:
             return None
 
@@ -318,8 +343,8 @@ class BookingService:
 
         return self.get_booking(booking_id)
 
-    def record_payment(self, booking_id: str, payment: PaymentRecordCreate) -> Optional[OfflineBookingResponse]:
-        booking = self.get_booking(booking_id)
+    def record_payment(self, booking_id: str, payment: PaymentRecordCreate, tenant_id: Optional[str] = None) -> Optional[OfflineBookingResponse]:
+        booking = self.get_booking(booking_id, tenant_id=tenant_id)
         if not booking:
             return None
 

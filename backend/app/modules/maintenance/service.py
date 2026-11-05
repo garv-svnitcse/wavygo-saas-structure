@@ -130,7 +130,7 @@ class MaintenanceService:
             except Exception:
                 pass
 
-    def create_maintenance(self, payload: MaintenanceCreate) -> MaintenanceResponse:
+    def create_maintenance(self, payload: MaintenanceCreate, tenant_id: Optional[str] = None) -> MaintenanceResponse:
         now_dt = datetime.now(timezone.utc)
         now_str = now_dt.isoformat()
 
@@ -163,6 +163,8 @@ class MaintenanceService:
             "status": payload.status.strip() if payload.status else "Ongoing",
             "mechanic_name": payload.mechanic_name.strip() if payload.mechanic_name else None,
             "notes": payload.notes.strip() if payload.notes else None,
+            "tenant_id": tenant_id,
+            "vendor_id": tenant_id,
             "created_at": now_str,
             "updated_at": now_str,
         }
@@ -203,6 +205,7 @@ class MaintenanceService:
         query: Optional[str] = None,
         skip: int = 0,
         limit: int = 50,
+        tenant_id: Optional[str] = None,
     ) -> List[MaintenanceResponse]:
         results: List[Dict[str, Any]] = []
 
@@ -210,19 +213,32 @@ class MaintenanceService:
         if db is not None:
             try:
                 mongo_filter: Dict[str, Any] = {}
+                if tenant_id:
+                    mongo_filter["$or"] = [
+                        {"tenant_id": tenant_id},
+                        {"vendor_id": tenant_id},
+                    ]
                 if status and status.lower() != "all":
                     mongo_filter["status"] = status
                 if vehicle_id:
-                    mongo_filter["$or"] = [{"vehicle_id": vehicle_id}, {"vehicle": vehicle_id}]
+                    v_cond = [{"vehicle_id": vehicle_id}, {"vehicle": vehicle_id}]
+                    if "$or" in mongo_filter:
+                        mongo_filter["$and"] = [{"$or": mongo_filter.pop("$or")}, {"$or": v_cond}]
+                    else:
+                        mongo_filter["$or"] = v_cond
                 if query:
                     regex_q = {"$regex": query, "$options": "i"}
-                    mongo_filter["$or"] = [
+                    q_cond = [
                         {"id": regex_q},
                         {"vehicle": regex_q},
                         {"type": regex_q},
                         {"damage_details": regex_q},
                         {"mechanic_name": regex_q},
                     ]
+                    if "$or" in mongo_filter:
+                        mongo_filter["$and"] = [{"$or": mongo_filter.pop("$or")}, {"$or": q_cond}]
+                    else:
+                        mongo_filter["$or"] = q_cond
                 cursor = db["maintenance"].find(mongo_filter).sort("created_at", -1).skip(skip).limit(limit)
                 for doc in cursor:
                     doc.pop("_id", None)
@@ -233,6 +249,8 @@ class MaintenanceService:
         # Fallback to in-memory store
         if not results:
             for item in sorted(self._memory_maintenance.values(), key=lambda x: x.get("created_at", ""), reverse=True):
+                if tenant_id and item.get("tenant_id") and item.get("tenant_id") != tenant_id:
+                    continue
                 if status and status.lower() != "all" and item.get("status") != status:
                     continue
                 if vehicle_id and item.get("vehicle_id") != vehicle_id and item.get("vehicle") != vehicle_id:
@@ -247,11 +265,14 @@ class MaintenanceService:
 
         return [MaintenanceResponse(**item) for item in results]
 
-    def get_maintenance(self, maintenance_id: str) -> Optional[MaintenanceResponse]:
+    def get_maintenance(self, maintenance_id: str, tenant_id: Optional[str] = None) -> Optional[MaintenanceResponse]:
         db = self._get_db()
         if db is not None:
             try:
-                doc = db["maintenance"].find_one({"$or": [{"id": maintenance_id}, {"_id": maintenance_id}]})
+                filt: dict[str, Any] = {"$or": [{"id": maintenance_id}, {"_id": maintenance_id}]}
+                if tenant_id:
+                    filt = {"$and": [filt, {"$or": [{"tenant_id": tenant_id}, {"vendor_id": tenant_id}, {"tenant_id": None}, {"vendor_id": None}]}]}
+                doc = db["maintenance"].find_one(filt)
                 if doc:
                     doc.pop("_id", None)
                     return MaintenanceResponse(**doc)
@@ -259,11 +280,14 @@ class MaintenanceService:
                 pass
 
         if maintenance_id in self._memory_maintenance:
-            return MaintenanceResponse(**self._memory_maintenance[maintenance_id])
+            m = self._memory_maintenance[maintenance_id]
+            if tenant_id and m.get("tenant_id") and m.get("tenant_id") != tenant_id:
+                return None
+            return MaintenanceResponse(**m)
         return None
 
-    def update_maintenance(self, maintenance_id: str, payload: MaintenanceUpdate) -> Optional[MaintenanceResponse]:
-        existing = self.get_maintenance(maintenance_id)
+    def update_maintenance(self, maintenance_id: str, payload: MaintenanceUpdate, tenant_id: Optional[str] = None) -> Optional[MaintenanceResponse]:
+        existing = self.get_maintenance(maintenance_id, tenant_id=tenant_id)
         if not existing:
             return None
 
@@ -350,25 +374,26 @@ class MaintenanceService:
             return True
         return False
 
-    def update_vehicle_review_status(self, payload: VehicleReviewStatusUpdate) -> Dict[str, Any]:
-        """
-        Transitions vehicle operational status:
-        - 'Rented': vehicle currently on trip
-        - 'Under Review': returned from rent, awaiting mechanic check
-        - 'Available': inspection cleared, ready to rent
-        - 'Maintenance': damage or flaw detected, moved to maintenance workshop
-        """
-        self._update_vehicle_availability_internal(payload.vehicle_id, payload.status)
+    def update_vehicle_review_status(self, vehicle_id_or_payload: Any, status: Optional[str] = None, notes: Optional[str] = None) -> Dict[str, Any]:
+        if isinstance(vehicle_id_or_payload, str):
+            v_id = vehicle_id_or_payload
+            st = status or "Available"
+            nt = notes
+        else:
+            v_id = getattr(vehicle_id_or_payload, "vehicle_id", str(vehicle_id_or_payload))
+            st = getattr(vehicle_id_or_payload, "status", status or "Available")
+            nt = getattr(vehicle_id_or_payload, "notes", notes)
+        self._update_vehicle_availability_internal(v_id, st)
         return {
-            "vehicle_id": payload.vehicle_id,
-            "status": payload.status,
-            "notes": payload.notes,
+            "vehicle_id": v_id,
+            "status": st,
+            "notes": nt,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "message": f"Vehicle status updated to '{payload.status}'.",
+            "message": f"Vehicle status updated to '{st}'.",
         }
 
-    def get_stats(self) -> MaintenanceStatsResponse:
-        records = self.list_maintenance(limit=1000)
+    def get_stats(self, tenant_id: Optional[str] = None) -> MaintenanceStatsResponse:
+        records = self.list_maintenance(limit=1000, tenant_id=tenant_id)
         open_count = sum(1 for r in records if r.status == "Ongoing")
         completed_count = sum(1 for r in records if r.status == "Completed")
         total_costs = sum(r.cost for r in records)

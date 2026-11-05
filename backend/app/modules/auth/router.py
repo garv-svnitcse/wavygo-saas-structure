@@ -1,12 +1,9 @@
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Any
 
-try:
-    import pyotp
-except ImportError:
-    pyotp = None
+import pyotp
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -107,7 +104,7 @@ def login(
     credentials: LoginRequest,
     request: Request,
     vendors: Annotated[
-        Collection[dict],
+        Collection[dict[str, Any]],
         Depends(get_vendors_collection),
     ],
 ) -> TokenResponse:
@@ -180,15 +177,7 @@ def login(
     )
 
     # Verify two-factor authentication
-    if valid and vendor.get("two_factor_enabled"):
-        if pyotp is None:
-            try:
-                import pyotp
-            except ImportError:
-                pass
-        if pyotp is None:
-            raise HTTPException(503, "Two-factor authentication service is unavailable.")
-
+    if valid and vendor is not None and vendor.get("two_factor_enabled"):
         try:
             valid = bool(
                 credentials.totp_code
@@ -205,15 +194,16 @@ def login(
             valid = False
 
     # Handle invalid login
-    if not valid:
-        if db is not None:
+    if not valid or vendor is None:
+        if db is not None and attempts is not None:
             attempts.insert_one({
                 "key": attempt_key,
                 "created_at": now,
             })
 
+            vendor_id_opt = vendor["_id"] if vendor is not None else None
             db["security_login_history"].insert_one({
-                "vendor_id": vendor["_id"] if vendor else None,
+                "vendor_id": vendor_id_opt,
                 "email": credentials.email,
                 "success": False,
                 "ip_address": (
@@ -229,15 +219,15 @@ def login(
 
             prefs = (
                 db["security_settings"].find_one({
-                    "vendor_id": vendor["_id"],
+                    "vendor_id": vendor_id_opt,
                 }) or {}
-                if vendor
+                if vendor_id_opt is not None
                 else {}
             )
 
-            if vendor and prefs.get("login_alerts", True):
+            if vendor_id_opt is not None and prefs.get("login_alerts", True):
                 db["security_events"].insert_one({
-                    "vendor_id": vendor["_id"],
+                    "vendor_id": vendor_id_opt,
                     "type": "failed_login",
                     "severity": "warning",
                     "message": "A failed sign-in attempt was detected.",
@@ -252,8 +242,13 @@ def login(
 
         raise unauthorized()
 
+    # Clear failed login attempts after successful login
+    if attempts is not None:
+        attempts.delete_many({
+            "key": attempt_key,
+        })
+
     # Compatibility fallback for tests using injected fake collections.
-    # Production login requires a configured MongoDB database.
     if db is None:
         session_id = ObjectId()
         token, expires_in = create_access_token(
@@ -328,11 +323,6 @@ def login(
         "created_at": now,
     })
 
-    # Clear failed login attempts after successful login
-    attempts.delete_many({
-        "key": attempt_key,
-    })
-
     # Generate access token
     token, expires_in = create_access_token(
         str(vendor["_id"]),
@@ -349,7 +339,7 @@ def login(
 def send_signup_otp(
     payload: SendOtpRequest,
     vendors: Annotated[
-        Collection[dict],
+        Collection[dict[str, Any]],
         Depends(get_vendors_collection),
     ],
 ) -> dict[str, str]:
@@ -397,7 +387,7 @@ def signup(
     payload: SignupRequest,
     request: Request,
     vendors: Annotated[
-        Collection[dict],
+        Collection[dict[str, Any]],
         Depends(get_vendors_collection),
     ],
 ) -> TokenResponse:

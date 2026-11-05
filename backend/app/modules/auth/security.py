@@ -114,6 +114,41 @@ def create_access_token(
     return token, expires_in
 
 
+def decode_access_token(token: str) -> dict[str, Any]:
+    return jwt.decode(
+        token,
+        get_jwt_secret(),
+        algorithms=[JWT_ALGORITHM],
+        issuer=JWT_ISSUER,
+        audience=JWT_AUDIENCE,
+    )
+
+
+def get_optional_vendor(
+    request: Request,
+) -> dict[str, Any] | None:
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None
+    token = auth_header.split(" ", 1)[1].strip()
+    try:
+        claims = decode_access_token(token)
+        subject = claims.get("sub")
+        if not subject or not ObjectId.is_valid(subject):
+            return None
+        database = getattr(request.app.state, "database", None)
+        if database is None:
+            from app.db.mongodb import create_mongo_client, get_database
+            client = create_mongo_client()
+            if client is not None:
+                database = get_database(client)
+        if database is None:
+            return None
+        return database["vendors"].find_one({"_id": ObjectId(subject), "is_active": True})
+    except Exception:
+        return None
+
+
 def get_vendors_collection(
     request: Request,
 ) -> Collection[dict[str, Any]]:
