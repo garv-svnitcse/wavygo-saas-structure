@@ -134,7 +134,7 @@ def get_optional_vendor(
     try:
         claims = decode_access_token(token)
         subject = claims.get("sub")
-        if not subject or not ObjectId.is_valid(subject):
+        if not subject:
             return None
         database = getattr(request.app.state, "database", None)
         if database is None:
@@ -142,9 +142,12 @@ def get_optional_vendor(
             client = create_mongo_client()
             if client is not None:
                 database = get_database(client)
-        if database is None:
-            return None
-        return database["vendors"].find_one({"_id": ObjectId(subject), "is_active": True})
+        if database is not None:
+            query = {"_id": ObjectId(subject)} if ObjectId.is_valid(subject) else {"_id": subject}
+            vendor = database["vendors"].find_one(query)
+            if vendor:
+                return vendor
+        return {"_id": subject, "id": str(subject), "is_active": True}
     except Exception:
         return None
 

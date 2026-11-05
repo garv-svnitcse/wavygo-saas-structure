@@ -123,16 +123,38 @@ function Dashboard() {
     year: 'numeric',
   }).toUpperCase()
 
-  // Trend data computed from backend or fallback monthly bins
-  const revenueTrend =
-    backendStats?.revenue_trend || [
-      { label: 'May', value: Math.round(totalPaidRevenue * 0.1) },
-      { label: 'Jun', value: Math.round(totalPaidRevenue * 0.15) },
-      { label: 'Jul', value: Math.round(totalPaidRevenue * 0.18) },
-      { label: 'Aug', value: Math.round(totalPaidRevenue * 0.22) },
-      { label: 'Sep', value: Math.round(totalPaidRevenue * 0.25) },
-      { label: 'Oct', value: totalPaidRevenue || 0 },
-    ]
+  // Dynamic monthly trend data computed from backend or real payments
+  const revenueTrend = useMemo(() => {
+    if (Array.isArray(backendStats?.revenue_trend) && backendStats.revenue_trend.length > 0) {
+      return backendStats.revenue_trend
+    }
+    const now = new Date()
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    const last6 = []
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      last6.push({
+        year: d.getFullYear(),
+        month: d.getMonth(),
+        label: monthNames[d.getMonth()],
+        value: 0,
+      })
+    }
+    payments.forEach((p) => {
+      const amt = Number(p.amount) || 0
+      if (!amt) return
+      const pDate = p.date ? new Date(p.date) : null
+      if (pDate && !isNaN(pDate.getTime())) {
+        const match = last6.find((m) => m.year === pDate.getFullYear() && m.month === pDate.getMonth())
+        if (match) match.value += amt
+      }
+    })
+    const totalAgg = last6.reduce((s, m) => s + m.value, 0)
+    if (totalAgg === 0 && totalPaidRevenue > 0) {
+      last6[last6.length - 1].value = totalPaidRevenue
+    }
+    return last6.map(({ label, value }) => ({ label, value: Math.round(value) }))
+  }, [backendStats?.revenue_trend, payments, totalPaidRevenue])
 
   const recentBookingsList = backendStats?.recent_bookings || bookings.slice(0, 4)
   const rentedDisplayList =

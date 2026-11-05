@@ -11,6 +11,16 @@ router = APIRouter()
 
 
 def _get_tenant_id(request: Request) -> Optional[str]:
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+        try:
+            from app.modules.auth.security import decode_access_token
+            claims = decode_access_token(token)
+            if claims.get("sub"):
+                return str(claims["sub"])
+        except Exception:
+            pass
     vendor = get_optional_vendor(request)
     return str(vendor["_id"]) if vendor and "_id" in vendor else None
 

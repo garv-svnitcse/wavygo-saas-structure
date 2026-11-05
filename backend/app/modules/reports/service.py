@@ -46,9 +46,7 @@ class ReportsService:
                 logger.warning("Reports: Error fetching vehicles: %s", exc)
 
             try:
-                b_query: Dict[str, Any] = {}
-                if tenant_id:
-                    b_query["$or"] = [{"tenant_id": str(tenant_id)}, {"vendor_id": str(tenant_id)}]
+                b_query: Dict[str, Any] = {"$or": [{"tenant_id": str(tenant_id)}, {"vendor_id": str(tenant_id)}]} if tenant_id else {"tenant_id": "__unauthenticated_none__"}
                 cursor = db["bookings"].find(b_query).sort("created_at", -1)
                 for doc in cursor:
                     doc["id"] = doc.get("id") or str(doc.get("_id"))
@@ -58,9 +56,7 @@ class ReportsService:
                 logger.warning("Reports: Error fetching bookings: %s", exc)
 
             try:
-                p_query: Dict[str, Any] = {}
-                if tenant_id:
-                    p_query["$or"] = [{"tenant_id": str(tenant_id)}, {"vendor_id": str(tenant_id)}]
+                p_query: Dict[str, Any] = {"$or": [{"tenant_id": str(tenant_id)}, {"vendor_id": str(tenant_id)}]} if tenant_id else {"tenant_id": "__unauthenticated_none__"}
                 cursor = db["payments"].find(p_query).sort("created_at", -1)
                 for doc in cursor:
                     doc["id"] = doc.get("id") or str(doc.get("_id"))
@@ -70,9 +66,7 @@ class ReportsService:
                 logger.warning("Reports: Error fetching payments: %s", exc)
 
             try:
-                m_query: Dict[str, Any] = {}
-                if tenant_id:
-                    m_query["$or"] = [{"tenant_id": str(tenant_id)}, {"vendor_id": str(tenant_id)}]
+                m_query: Dict[str, Any] = {"$or": [{"tenant_id": str(tenant_id)}, {"vendor_id": str(tenant_id)}]} if tenant_id else {"tenant_id": "__unauthenticated_none__"}
                 cursor = db["maintenance"].find(m_query).sort("created_at", -1)
                 for doc in cursor:
                     doc["id"] = doc.get("id") or str(doc.get("_id"))
@@ -82,9 +76,7 @@ class ReportsService:
                 logger.warning("Reports: Error fetching maintenance: %s", exc)
 
             try:
-                c_query: Dict[str, Any] = {}
-                if tenant_id:
-                    c_query["$or"] = [{"tenant_id": str(tenant_id)}, {"vendor_id": str(tenant_id)}]
+                c_query: Dict[str, Any] = {"$or": [{"tenant_id": str(tenant_id)}, {"vendor_id": str(tenant_id)}]} if tenant_id else {"tenant_id": "__unauthenticated_none__"}
                 cursor = db["customers"].find(c_query).sort("created_at", -1)
                 for doc in cursor:
                     doc["id"] = doc.get("id") or str(doc.get("_id"))

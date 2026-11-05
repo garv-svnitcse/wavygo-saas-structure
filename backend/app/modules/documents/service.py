@@ -224,9 +224,11 @@ class DocumentService:
                 mongo_filter: Dict[str, Any] = {}
                 if tenant_id:
                     mongo_filter["$or"] = [
-                        {"tenant_id": tenant_id},
-                        {"vendor_id": tenant_id},
+                        {"tenant_id": str(tenant_id)},
+                        {"vendor_id": str(tenant_id)},
                     ]
+                else:
+                    mongo_filter["tenant_id"] = "__unauthenticated_none__"
                 if scope and scope.lower() != "all":
                     mongo_filter["scope"] = scope.capitalize()
                 if category and category.lower() != "all":

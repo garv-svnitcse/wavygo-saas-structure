@@ -154,9 +154,7 @@ class DashboardService:
 
         if db is not None:
             try:
-                v_query: Dict[str, Any] = {}
-                if tenant_id:
-                    v_query["$or"] = [{"tenant_id": str(tenant_id)}, {"tenantId": str(tenant_id)}, {"vendor_id": str(tenant_id)}]
+                v_query: Dict[str, Any] = {"$or": [{"tenant_id": str(tenant_id)}, {"tenantId": str(tenant_id)}, {"vendor_id": str(tenant_id)}]} if tenant_id else {"tenant_id": "__unauthenticated_none__"}
                 cursor = db["vehicles"].find(v_query)
                 for doc in cursor:
                     doc["id"] = doc.get("id") or str(doc.get("_id"))
@@ -166,9 +164,7 @@ class DashboardService:
                 logger.warning("Error fetching vehicles for dashboard: %s", exc)
 
             try:
-                b_query: Dict[str, Any] = {}
-                if tenant_id:
-                    b_query["$or"] = [{"tenant_id": str(tenant_id)}, {"vendor_id": str(tenant_id)}]
+                b_query: Dict[str, Any] = {"$or": [{"tenant_id": str(tenant_id)}, {"vendor_id": str(tenant_id)}]} if tenant_id else {"tenant_id": "__unauthenticated_none__"}
                 cursor = db["bookings"].find(b_query).sort("created_at", -1)
                 for doc in cursor:
                     doc["id"] = doc.get("id") or str(doc.get("_id"))
@@ -178,9 +174,7 @@ class DashboardService:
                 logger.warning("Error fetching bookings for dashboard: %s", exc)
 
             try:
-                p_query: Dict[str, Any] = {}
-                if tenant_id:
-                    p_query["$or"] = [{"tenant_id": str(tenant_id)}, {"vendor_id": str(tenant_id)}]
+                p_query: Dict[str, Any] = {"$or": [{"tenant_id": str(tenant_id)}, {"vendor_id": str(tenant_id)}]} if tenant_id else {"tenant_id": "__unauthenticated_none__"}
                 cursor = db["payments"].find(p_query).sort("created_at", -1)
                 for doc in cursor:
                     doc["id"] = doc.get("id") or str(doc.get("_id"))
@@ -263,15 +257,61 @@ class DashboardService:
             round((rented_vehicles_count / total_vehicles) * 100) if total_vehicles > 0 else 0
         )
 
-        # Dynamic monthly trend data based on actual revenue
-        trend_months = ["May", "Jun", "Jul", "Aug", "Sep", "Oct"]
+        # Dynamic monthly revenue trend for the last 6 months based on actual payment / booking dates
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+
+        # Build list of the last 6 months: (year, month, label)
+        months_window = []
+        for i in range(5, -1, -1):
+            m = now.month - i
+            y = now.year
+            while m <= 0:
+                m += 12
+                y -= 1
+            month_date = datetime(y, m, 1, tzinfo=timezone.utc)
+            label = month_date.strftime("%b")
+            months_window.append((y, m, label))
+
+        # Monthly buckets initialized to 0.0
+        monthly_buckets = {(y, m): 0.0 for y, m, _ in months_window}
+
+        # Sum real payments into matching month
+        for p in payments:
+            amt = float(p.get("amount") or 0.0)
+            p_date_str = p.get("created_at") or p.get("date") or p.get("payment_date")
+            if p_date_str and amt > 0:
+                try:
+                    dt = datetime.fromisoformat(str(p_date_str).replace("Z", "+00:00"))
+                    key = (dt.year, dt.month)
+                    if key in monthly_buckets:
+                        monthly_buckets[key] += amt
+                except Exception:
+                    pass
+
+        # If no payments matched buckets but bookings exist, aggregate from bookings
+        if sum(monthly_buckets.values()) == 0 and bookings:
+            for b in bookings:
+                amt = float(b.get("paid") or 0.0)
+                b_date_str = b.get("created_at")
+                if b_date_str and amt > 0:
+                    try:
+                        dt = datetime.fromisoformat(str(b_date_str).replace("Z", "+00:00"))
+                        key = (dt.year, dt.month)
+                        if key in monthly_buckets:
+                            monthly_buckets[key] += amt
+                    except Exception:
+                        pass
+
+        # If total_revenue > 0 but none matched (e.g. legacy records), attribute to current month
+        if sum(monthly_buckets.values()) == 0 and total_revenue > 0:
+            current_key = (now.year, now.month)
+            if current_key in monthly_buckets:
+                monthly_buckets[current_key] = round(total_revenue, 2)
+
         revenue_trend: List[RevenueTrendItem] = [
-            RevenueTrendItem(label="May", value=round(total_revenue * 0.10, 2) if total_revenue > 0 else 0.0),
-            RevenueTrendItem(label="Jun", value=round(total_revenue * 0.15, 2) if total_revenue > 0 else 0.0),
-            RevenueTrendItem(label="Jul", value=round(total_revenue * 0.18, 2) if total_revenue > 0 else 0.0),
-            RevenueTrendItem(label="Aug", value=round(total_revenue * 0.22, 2) if total_revenue > 0 else 0.0),
-            RevenueTrendItem(label="Sep", value=round(total_revenue * 0.25, 2) if total_revenue > 0 else 0.0),
-            RevenueTrendItem(label="Oct", value=round(total_revenue, 2)),
+            RevenueTrendItem(label=label, value=round(monthly_buckets[(y, m)], 2))
+            for y, m, label in months_window
         ]
 
         # Recent 4 bookings

@@ -37,15 +37,15 @@ def _serialize_tenant(doc: dict[str, Any]) -> dict[str, Any]:
     item.pop("email_normalized", None)
 
     # Standardize field names
-    item["businessName"] = item.get("business_name") or item.get("businessName") or "WavyGo Mobility Hub"
-    item["ownerName"] = item.get("owner_name") or item.get("ownerName") or item.get("owner") or "Fleet Owner"
+    item["businessName"] = item.get("business_name") or item.get("businessName") or ""
+    item["ownerName"] = item.get("owner_name") or item.get("ownerName") or item.get("owner") or ""
     item["email"] = item.get("email") or ""
-    item["phone"] = item.get("phone") or "+91 98765 43210"
-    item["address"] = item.get("address") or "Indiranagar, Bengaluru, Karnataka"
-    item["city"] = item.get("city") or "Bengaluru"
-    item["state"] = item.get("state") or "Karnataka"
-    item["pincode"] = item.get("pincode") or "560038"
-    item["gstin"] = item.get("gstin") or "29AABCU9603R1ZM"
+    item["phone"] = item.get("phone") or ""
+    item["address"] = item.get("address") or ""
+    item["city"] = item.get("city") or ""
+    item["state"] = item.get("state") or ""
+    item["pincode"] = item.get("pincode") or ""
+    item["gstin"] = item.get("gstin") or ""
     item["status"] = "Active" if item.get("is_active", True) else item.get("status", "Inactive")
     item["plan"] = item.get("plan") or "Growth"
 
@@ -181,7 +181,7 @@ def get_tenant_stats(
 
     return {
         "tenant_id": tenant_str,
-        "business_name": vendor.get("business_name", "WavyGo Mobility Hub"),
+        "business_name": vendor.get("business_name") or vendor.get("businessName") or "",
         "vehicles": {
             "total": total_vehicles,
             "available": available_vehicles,
