@@ -14,6 +14,7 @@ import {
 import { Link } from 'react-router-dom'
 import { useDemoData } from '../../data/DemoDataContext.jsx'
 import { dashboardService } from '../../services/dashboardService.js'
+import { tenantService } from '../../services/tenantService.js'
 import {
   BarChart,
   Button,
@@ -23,23 +24,6 @@ import {
   PageHeader,
   StatusBadge,
 } from '../../components/ui/Workspace.jsx'
-
-function createSampleArrivals(vehicles = [], customers = [], staff = []) {
-  const samples = [
-    { bookingId: 'BK-3985', vehicleId: 'VH-1042', customerId: 'CU-2048', staffId: 'ST-024', minutesFromNow: 35, pickupLocation: 'WavyGo Ahmedabad Hub', returnLocation: 'Ahmedabad Airport' },
-    { bookingId: 'BK-3986', vehicleId: 'VH-1038', customerId: 'CU-2047', staffId: 'ST-023', minutesFromNow: 95, pickupLocation: 'Satellite Road Hub', returnLocation: 'Prahlad Nagar' },
-    { bookingId: 'BK-3987', vehicleId: 'VH-1034', customerId: 'CU-2046', staffId: 'ST-022', minutesFromNow: 180, pickupLocation: 'Navrangpura Hub', returnLocation: 'Ahmedabad Railway Station' },
-  ]
-
-  return samples.map((sample) => ({
-    ...sample,
-    vehicle: vehicles.find((vehicle) => vehicle.id === sample.vehicleId),
-    customer: customers.find((customer) => customer.id === sample.customerId),
-    staff: staff.find((person) => person.id === sample.staffId),
-    expectedAt: Date.now() + sample.minutesFromNow * 60_000,
-    status: 'Upcoming',
-  }))
-}
 
 function formatArrivalCountdown(arrival, now) {
   if (arrival.status === 'Arrived') return 'Marked as arrived'
@@ -55,9 +39,23 @@ function Dashboard() {
   const { bookings = [], vehicles = [], payments = [], customers = [], staff = [] } = useDemoData()
   const [dateRange, setDateRange] = useState('Last 30 days')
   const [backendStats, setBackendStats] = useState(null)
+  const [vendorProfile, setVendorProfile] = useState(null)
   const [arrivalFilter, setArrivalFilter] = useState('All Upcoming')
-  const [arrivals, setArrivals] = useState(() => createSampleArrivals(vehicles, customers, staff))
+  const [arrivals, setArrivals] = useState([])
   const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    let active = true
+    tenantService
+      .getCurrentTenant()
+      .then((profile) => {
+        if (active && profile) setVendorProfile(profile)
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 15_000)
@@ -140,13 +138,15 @@ function Dashboard() {
   const rentedDisplayList =
     backendStats?.rented_vehicles_list?.length > 0
       ? backendStats.rented_vehicles_list
-      : (rentedVehicles.length > 0 ? rentedVehicles : vehicles.slice(0, 2))
+      : rentedVehicles
+
+  const partnerGreeting = vendorProfile?.businessName || vendorProfile?.ownerName || 'Partner'
 
   return (
     <div>
       <PageHeader
         eyebrow={todayDate}
-        title="Good day, Partner"
+        title={`Good day, ${partnerGreeting}`}
         description="Here is what is happening across your rental fleet and bookings today."
         action={
           <div className="flex flex-wrap gap-2">

@@ -246,10 +246,10 @@ class MaintenanceService:
             except Exception:
                 pass
 
-        # Fallback to in-memory store
-        if not results:
+        # Fallback to in-memory store if DB is unreachable or for unauthenticated test suites
+        if not results and (db is None or not tenant_id):
             for item in sorted(self._memory_maintenance.values(), key=lambda x: x.get("created_at", ""), reverse=True):
-                if tenant_id and item.get("tenant_id") and item.get("tenant_id") != tenant_id:
+                if tenant_id and (item.get("tenant_id") != tenant_id and item.get("vendor_id") != tenant_id):
                     continue
                 if status and status.lower() != "all" and item.get("status") != status:
                     continue

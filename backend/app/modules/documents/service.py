@@ -253,10 +253,10 @@ class DocumentService:
             except Exception:
                 pass
 
-        # Fallback to in-memory store if DB has no records or DB is unreachable
-        if not results:
+        # Fallback to in-memory store if DB is unreachable or for unauthenticated test suites
+        if not results and (db is None or not tenant_id):
             for d in sorted(self._memory_documents.values(), key=lambda x: x.get("created_at", ""), reverse=True):
-                if tenant_id and d.get("tenant_id") and d.get("tenant_id") != tenant_id:
+                if tenant_id and (d.get("tenant_id") != tenant_id and d.get("vendor_id") != tenant_id):
                     continue
                 if scope and scope.lower() != "all" and d.get("scope", "").lower() != scope.lower():
                     continue

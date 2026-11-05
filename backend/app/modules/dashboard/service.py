@@ -32,6 +32,41 @@ class DashboardService:
     ) -> List[UpcomingArrivalItem]:
         import time
         now_ms = time.time() * 1000
+
+        db = self._get_db()
+        if db is not None and tenant_id:
+            try:
+                b_query = {
+                    "$or": [{"tenant_id": str(tenant_id)}, {"vendor_id": str(tenant_id)}],
+                    "status": {"$in": ["Active", "Confirmed", "Upcoming"]},
+                }
+                cursor = db["bookings"].find(b_query).sort("created_at", -1).limit(10)
+                arrivals: List[UpcomingArrivalItem] = []
+                for b in cursor:
+                    b_id = str(b.get("id") or b.get("_id"))
+                    is_arrived = b_id in self._arrived_ids or b.get("arrival_status") == "Arrived"
+                    arrivals.append(
+                        UpcomingArrivalItem(
+                            bookingId=b_id,
+                            vehicleId=str(b.get("vehicle_id") or b.get("vehicle") or ""),
+                            customerId=str(b.get("customer_id") or ""),
+                            staffId=str(b.get("staff_id") or ""),
+                            pickupLocation=b.get("pickup_location") or "Vendor Hub",
+                            returnLocation=b.get("return_location") or "Vendor Hub",
+                            expectedAt=b.get("end_date_ms") or (now_ms + 3600_000),
+                            status="Arrived" if is_arrived else "Upcoming",
+                            vehicle={"id": str(b.get("vehicle_id") or ""), "name": str(b.get("vehicle") or "Vehicle"), "registration": str(b.get("registration") or ""), "image": "🛵"},
+                            customer={"name": str(b.get("customer") or "Customer"), "phone": str(b.get("phone") or "")},
+                            staff={"name": str(b.get("staff") or "Operations Associate")},
+                        )
+                    )
+                return arrivals
+            except Exception as exc:
+                logger.warning("Error fetching tenant arrivals: %s", exc)
+
+        if tenant_id:
+            return []
+
         default_samples = [
             {
                 "bookingId": "BK-3985",
@@ -121,7 +156,7 @@ class DashboardService:
             try:
                 v_query: Dict[str, Any] = {}
                 if tenant_id:
-                    v_query["$or"] = [{"tenant_id": str(tenant_id)}, {"tenantId": str(tenant_id)}]
+                    v_query["$or"] = [{"tenant_id": str(tenant_id)}, {"tenantId": str(tenant_id)}, {"vendor_id": str(tenant_id)}]
                 cursor = db["vehicles"].find(v_query)
                 for doc in cursor:
                     doc["id"] = doc.get("id") or str(doc.get("_id"))
@@ -131,7 +166,10 @@ class DashboardService:
                 logger.warning("Error fetching vehicles for dashboard: %s", exc)
 
             try:
-                cursor = db["bookings"].find({}).sort("created_at", -1)
+                b_query: Dict[str, Any] = {}
+                if tenant_id:
+                    b_query["$or"] = [{"tenant_id": str(tenant_id)}, {"vendor_id": str(tenant_id)}]
+                cursor = db["bookings"].find(b_query).sort("created_at", -1)
                 for doc in cursor:
                     doc["id"] = doc.get("id") or str(doc.get("_id"))
                     doc.pop("_id", None)
@@ -140,7 +178,10 @@ class DashboardService:
                 logger.warning("Error fetching bookings for dashboard: %s", exc)
 
             try:
-                cursor = db["payments"].find({}).sort("created_at", -1)
+                p_query: Dict[str, Any] = {}
+                if tenant_id:
+                    p_query["$or"] = [{"tenant_id": str(tenant_id)}, {"vendor_id": str(tenant_id)}]
+                cursor = db["payments"].find(p_query).sort("created_at", -1)
                 for doc in cursor:
                     doc["id"] = doc.get("id") or str(doc.get("_id"))
                     doc.pop("_id", None)
@@ -148,52 +189,53 @@ class DashboardService:
             except Exception as exc:
                 logger.warning("Error fetching payments for dashboard: %s", exc)
 
-        # Fallback to in-memory bookings/vehicles service if MongoDB is empty (test suites / offline mode)
-        if not bookings:
-            try:
-                from app.modules.bookings.service import booking_service
-                for b in booking_service._memory_bookings.values():
-                    bookings.append(dict(b))
-            except Exception:
-                pass
+        # Fallback to in-memory bookings/vehicles service only if no tenant_id (unauthenticated test suites)
+        if not tenant_id:
+            if not bookings:
+                try:
+                    from app.modules.bookings.service import booking_service
+                    for b in booking_service._memory_bookings.values():
+                        bookings.append(dict(b))
+                except Exception:
+                    pass
 
-        if not vehicles:
-            try:
-                # Seed defaults for offline / dev
-                vehicles = [
-                    {
-                        "id": "VH-2001",
-                        "name": "Royal Enfield Classic 350",
-                        "makeModel": "Royal Enfield Classic 350",
-                        "registration": "KA 01 EQ 4821",
-                        "type": "Motorcycle",
-                        "fleetAvailability": "Available",
-                        "availability": "Available",
-                        "dailyRate": 1200.0,
-                    },
-                    {
-                        "id": "VH-2002",
-                        "name": "Honda Activa 6G",
-                        "makeModel": "Honda Activa 6G",
-                        "registration": "KA 03 MX 9182",
-                        "type": "Scooter",
-                        "fleetAvailability": "Rented",
-                        "availability": "Rented",
-                        "dailyRate": 450.0,
-                    },
-                    {
-                        "id": "VH-2003",
-                        "name": "Ather 450X Gen 3",
-                        "makeModel": "Ather 450X Gen 3",
-                        "registration": "KA 05 AB 1049",
-                        "type": "Electric",
-                        "fleetAvailability": "Rented",
-                        "availability": "Rented",
-                        "dailyRate": 800.0,
-                    },
-                ]
-            except Exception:
-                pass
+            if not vehicles:
+                try:
+                    # Seed defaults for offline / dev test suites
+                    vehicles = [
+                        {
+                            "id": "VH-2001",
+                            "name": "Royal Enfield Classic 350",
+                            "makeModel": "Royal Enfield Classic 350",
+                            "registration": "KA 01 EQ 4821",
+                            "type": "Motorcycle",
+                            "fleetAvailability": "Available",
+                            "availability": "Available",
+                            "dailyRate": 1200.0,
+                        },
+                        {
+                            "id": "VH-2002",
+                            "name": "Honda Activa 6G",
+                            "makeModel": "Honda Activa 6G",
+                            "registration": "KA 03 MX 9182",
+                            "type": "Scooter",
+                            "fleetAvailability": "Rented",
+                            "availability": "Rented",
+                            "dailyRate": 450.0,
+                        },
+                        {
+                            "id": "VH-2003",
+                            "name": "Ather 450X Gen 3",
+                            "makeModel": "Ather 450X Gen 3",
+                            "registration": "KA 05 AB 1049",
+                            "type": "Electric",
+                            "fleetAvailability": "Rented",
+                            "availability": "Rented",
+                            "dailyRate": 800.0,
+                        },
+                    ]
+                except Exception:
+                    pass
 
         # Calculations
         total_vehicles = len(vehicles)
@@ -224,11 +266,11 @@ class DashboardService:
         # Dynamic monthly trend data based on actual revenue
         trend_months = ["May", "Jun", "Jul", "Aug", "Sep", "Oct"]
         revenue_trend: List[RevenueTrendItem] = [
-            RevenueTrendItem(label="May", value=round(total_revenue * 0.10, 2)),
-            RevenueTrendItem(label="Jun", value=round(total_revenue * 0.15, 2)),
-            RevenueTrendItem(label="Jul", value=round(total_revenue * 0.18, 2)),
-            RevenueTrendItem(label="Aug", value=round(total_revenue * 0.22, 2)),
-            RevenueTrendItem(label="Sep", value=round(total_revenue * 0.25, 2)),
+            RevenueTrendItem(label="May", value=round(total_revenue * 0.10, 2) if total_revenue > 0 else 0.0),
+            RevenueTrendItem(label="Jun", value=round(total_revenue * 0.15, 2) if total_revenue > 0 else 0.0),
+            RevenueTrendItem(label="Jul", value=round(total_revenue * 0.18, 2) if total_revenue > 0 else 0.0),
+            RevenueTrendItem(label="Aug", value=round(total_revenue * 0.22, 2) if total_revenue > 0 else 0.0),
+            RevenueTrendItem(label="Sep", value=round(total_revenue * 0.25, 2) if total_revenue > 0 else 0.0),
             RevenueTrendItem(label="Oct", value=round(total_revenue, 2)),
         ]
 
@@ -252,7 +294,7 @@ class DashboardService:
         rented_raw = [
             v for v in vehicles if (v.get("fleetAvailability") == "Rented" or v.get("availability") == "Rented")
         ]
-        if not rented_raw and vehicles:
+        if not rented_raw and vehicles and not tenant_id:
             rented_raw = vehicles[:2]
 
         for v in rented_raw[:4]:

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   ArrowDownToLine,
   ArrowUpRight,
@@ -33,6 +33,7 @@ import { tenantService } from '../services/tenantService.js'
 import { paymentService } from '../services/paymentService.js'
 import { financeService } from '../services/financeService.js'
 import { reportService } from '../services/reportService.js'
+import { staffService } from '../services/staffService.js'
 import {
   BarChart,
   Button,
@@ -1724,7 +1725,7 @@ function Maintenance() {
 }
 
 function Staff() {
-  const { staff = [], addRecord, updateRecord } = useDemoData()
+  const { staff = [], addRecord, updateRecord, syncStaff } = useDemoData()
   const [tab, setTab] = useState('All')
   const [query, setQuery] = useState('')
   const [showForm, setShowForm] = useState(false)
@@ -1948,7 +1949,9 @@ function Staff() {
               ...(token ? { Authorization: `Bearer ${token}` } : {}),
             },
             body: JSON.stringify(newRecord),
-          }).catch(() => {})
+          })
+            .then(() => syncStaff?.())
+            .catch(() => {})
         } catch (_) {}
       }} showDemoNote={false} />}
       {selected && <DetailDialog title={selected.name} onClose={() => setSelected(null)} showDemoNote={false} rows={[
@@ -2254,11 +2257,11 @@ const settingSections = [
 ]
 
 const defaultSettings = {
-  businessName: 'WavyGo Mobility',
-  owner: 'WavyGo Vendor',
-  phone: '+91 98765 43210',
-  email: 'hello@wavygo.example',
-  address: 'Ahmedabad, Gujarat',
+  businessName: '',
+  owner: '',
+  phone: '',
+  email: '',
+  address: '',
   minimum: '24',
   advance: '90',
   deposit: '2000',
@@ -2268,9 +2271,9 @@ const defaultSettings = {
   bookingNotifications: 'Enabled',
   paymentNotifications: 'Enabled',
   maintenanceNotifications: 'Enabled',
-  profileName: 'WavyGo Vendor',
-  profileEmail: 'vendor@wavygo.example',
-  profilePhone: '+91 98765 43210',
+  profileName: '',
+  profileEmail: '',
+  profilePhone: '',
   staffAccess: 'Bookings and customers',
   invitePolicy: 'Owner approval',
   businessCategories: 'Shop License, GST Certificate, PAN Card',

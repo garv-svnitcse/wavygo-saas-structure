@@ -204,10 +204,10 @@ class FinanceService:
             except Exception as exc:
                 logger.error("Failed to list expenses from MongoDB: %s", exc)
 
-        # Fallback to in-memory store
-        if not results:
+        # Fallback to in-memory store if DB is unreachable or for unauthenticated test suites
+        if not results and (db is None or not tenant_id):
             for item in sorted(self._memory_expenses.values(), key=lambda x: x.get("created_at", ""), reverse=True):
-                if tenant_id and item.get("tenant_id") and item.get("tenant_id") != tenant_id:
+                if tenant_id and (item.get("tenant_id") != tenant_id and item.get("vendor_id") != tenant_id):
                     continue
                 if category and category.lower() != "all" and item.get("category", "").lower() != category.lower():
                     continue

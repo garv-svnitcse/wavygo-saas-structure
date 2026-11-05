@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import {
   Activity,
   BarChart3,
@@ -15,6 +16,7 @@ import {
 } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 import { useDemoData } from '../../data/DemoDataContext.jsx'
+import { tenantService } from '../../services/tenantService.js'
 
 const links = [
   { label: 'Dashboard', to: '/app/dashboard', icon: LayoutDashboard },
@@ -32,6 +34,29 @@ const links = [
 
 function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onCloseMobile }) {
   const { unreadNotificationsCount = 0 } = useDemoData()
+  const [profile, setProfile] = useState(null)
+
+  useEffect(() => {
+    let active = true
+    tenantService
+      .getCurrentTenant()
+      .then((data) => {
+        if (active && data) setProfile(data)
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const businessName = profile?.businessName || 'Vendor Workspace'
+  const ownerName = profile?.ownerName || profile?.businessName || 'Vendor Partner'
+  const initials = businessName
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join('') || 'WG'
   return (
     <>
       {mobileOpen && (
@@ -67,12 +92,12 @@ function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onCloseMobile }) {
         {!collapsed && (
           <div className="mx-3 mt-4 rounded-xl border border-white/[0.08] bg-white/[0.055] px-3 py-2.5">
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-100/50">Workspace</p>
-            <p className="mt-1 truncate text-xs font-medium text-white/90">WavyGo Mobility</p>
+            <p className="mt-1 truncate text-xs font-medium text-white/90">{businessName}</p>
           </div>
         )}
         {collapsed && (
-          <div className="mx-auto mt-4 grid size-9 place-items-center rounded-xl border border-white/[0.08] bg-white/[0.055] text-[11px] font-semibold text-emerald-100" title="WavyGo Mobility">
-            WG
+          <div className="mx-auto mt-4 grid size-9 place-items-center rounded-xl border border-white/[0.08] bg-white/[0.055] text-[11px] font-semibold text-emerald-100" title={businessName}>
+            {initials}
           </div>
         )}
 
@@ -115,8 +140,13 @@ function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onCloseMobile }) {
 
         <div className={`border-t border-white/[0.08] p-3 ${collapsed ? 'flex justify-center' : ''}`}>
           <div className={`flex items-center gap-3 rounded-xl bg-white/[0.055] p-2.5 ${collapsed ? 'justify-center bg-transparent p-0' : ''}`}>
-            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#D8F4E7] text-[11px] font-bold text-[#123B2D]">WM</span>
-            {!collapsed && <div className="min-w-0"><p className="truncate text-xs font-medium text-white/90">WavyGo Vendor</p><p className="mt-0.5 text-[10px] text-emerald-100/50">Demo workspace</p></div>}
+            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#D8F4E7] text-[11px] font-bold text-[#123B2D]">{initials}</span>
+            {!collapsed && (
+              <div className="min-w-0">
+                <p className="truncate text-xs font-medium text-white/90">{ownerName}</p>
+                <p className="mt-0.5 text-[10px] text-emerald-100/50">{profile?.plan ? `${profile.plan} Partner` : 'Active Hub'}</p>
+              </div>
+            )}
           </div>
         </div>
       </aside>

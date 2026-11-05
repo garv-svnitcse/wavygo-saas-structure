@@ -36,7 +36,7 @@ class ReportsService:
             try:
                 v_query: Dict[str, Any] = {}
                 if tenant_id:
-                    v_query["$or"] = [{"tenant_id": str(tenant_id)}, {"tenantId": str(tenant_id)}]
+                    v_query["$or"] = [{"tenant_id": str(tenant_id)}, {"tenantId": str(tenant_id)}, {"vendor_id": str(tenant_id)}]
                 cursor = db["vehicles"].find(v_query)
                 for doc in cursor:
                     doc["id"] = doc.get("id") or str(doc.get("_id"))
@@ -46,7 +46,10 @@ class ReportsService:
                 logger.warning("Reports: Error fetching vehicles: %s", exc)
 
             try:
-                cursor = db["bookings"].find({}).sort("created_at", -1)
+                b_query: Dict[str, Any] = {}
+                if tenant_id:
+                    b_query["$or"] = [{"tenant_id": str(tenant_id)}, {"vendor_id": str(tenant_id)}]
+                cursor = db["bookings"].find(b_query).sort("created_at", -1)
                 for doc in cursor:
                     doc["id"] = doc.get("id") or str(doc.get("_id"))
                     doc.pop("_id", None)
@@ -55,7 +58,10 @@ class ReportsService:
                 logger.warning("Reports: Error fetching bookings: %s", exc)
 
             try:
-                cursor = db["payments"].find({}).sort("created_at", -1)
+                p_query: Dict[str, Any] = {}
+                if tenant_id:
+                    p_query["$or"] = [{"tenant_id": str(tenant_id)}, {"vendor_id": str(tenant_id)}]
+                cursor = db["payments"].find(p_query).sort("created_at", -1)
                 for doc in cursor:
                     doc["id"] = doc.get("id") or str(doc.get("_id"))
                     doc.pop("_id", None)
@@ -64,7 +70,10 @@ class ReportsService:
                 logger.warning("Reports: Error fetching payments: %s", exc)
 
             try:
-                cursor = db["maintenance"].find({}).sort("created_at", -1)
+                m_query: Dict[str, Any] = {}
+                if tenant_id:
+                    m_query["$or"] = [{"tenant_id": str(tenant_id)}, {"vendor_id": str(tenant_id)}]
+                cursor = db["maintenance"].find(m_query).sort("created_at", -1)
                 for doc in cursor:
                     doc["id"] = doc.get("id") or str(doc.get("_id"))
                     doc.pop("_id", None)
@@ -73,7 +82,10 @@ class ReportsService:
                 logger.warning("Reports: Error fetching maintenance: %s", exc)
 
             try:
-                cursor = db["customers"].find({}).sort("created_at", -1)
+                c_query: Dict[str, Any] = {}
+                if tenant_id:
+                    c_query["$or"] = [{"tenant_id": str(tenant_id)}, {"vendor_id": str(tenant_id)}]
+                cursor = db["customers"].find(c_query).sort("created_at", -1)
                 for doc in cursor:
                     doc["id"] = doc.get("id") or str(doc.get("_id"))
                     doc.pop("_id", None)
@@ -81,48 +93,49 @@ class ReportsService:
             except Exception as exc:
                 logger.warning("Reports: Error fetching customers: %s", exc)
 
-        # Fallback to service memory for test suites / offline dev
-        if not bookings:
-            try:
-                from app.modules.bookings.service import booking_service
-                for b in booking_service._memory_bookings.values():
-                    bookings.append(dict(b))
-            except Exception:
-                pass
+        # Fallback to service memory for unauthenticated test suites only
+        if not tenant_id:
+            if not bookings:
+                try:
+                    from app.modules.bookings.service import booking_service
+                    for b in booking_service._memory_bookings.values():
+                        bookings.append(dict(b))
+                except Exception:
+                    pass
 
-        if not vehicles:
-            vehicles = [
-                {
-                    "id": "VH-2001",
-                    "name": "Royal Enfield Classic 350",
-                    "makeModel": "Royal Enfield Classic 350",
-                    "registration": "KA 01 EQ 4821",
-                    "type": "Motorcycle",
-                    "fleetAvailability": "Available",
-                    "availability": "Available",
-                    "dailyRate": 1200.0,
-                },
-                {
-                    "id": "VH-2002",
-                    "name": "Honda Activa 6G",
-                    "makeModel": "Honda Activa 6G",
-                    "registration": "KA 03 MX 9182",
-                    "type": "Scooter",
-                    "fleetAvailability": "Rented",
-                    "availability": "Rented",
-                    "dailyRate": 450.0,
-                },
-                {
-                    "id": "VH-2003",
-                    "name": "Ather 450X Gen 3",
-                    "makeModel": "Ather 450X Gen 3",
-                    "registration": "KA 05 AB 1049",
-                    "type": "Electric",
-                    "fleetAvailability": "Rented",
-                    "availability": "Rented",
-                    "dailyRate": 800.0,
-                },
-            ]
+            if not vehicles:
+                vehicles = [
+                    {
+                        "id": "VH-2001",
+                        "name": "Royal Enfield Classic 350",
+                        "makeModel": "Royal Enfield Classic 350",
+                        "registration": "KA 01 EQ 4821",
+                        "type": "Motorcycle",
+                        "fleetAvailability": "Available",
+                        "availability": "Available",
+                        "dailyRate": 1200.0,
+                    },
+                    {
+                        "id": "VH-2002",
+                        "name": "Honda Activa 6G",
+                        "makeModel": "Honda Activa 6G",
+                        "registration": "KA 03 MX 9182",
+                        "type": "Scooter",
+                        "fleetAvailability": "Rented",
+                        "availability": "Rented",
+                        "dailyRate": 450.0,
+                    },
+                    {
+                        "id": "VH-2003",
+                        "name": "Ather 450X Gen 3",
+                        "makeModel": "Ather 450X Gen 3",
+                        "registration": "KA 05 AB 1049",
+                        "type": "Electric",
+                        "fleetAvailability": "Rented",
+                        "availability": "Rented",
+                        "dailyRate": 800.0,
+                    },
+                ]
 
         if not customers and bookings:
             # Derive unique customers from bookings

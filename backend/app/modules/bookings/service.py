@@ -256,10 +256,10 @@ class BookingService:
             except Exception as exc:
                 logger.error("Failed to list bookings from Mongo: %s", exc)
 
-        # Fallback to in-memory store if no results or Mongo unavailable
-        if not results:
+        # Fallback to in-memory store if DB is unreachable or for unauthenticated test suites
+        if not results and (db is None or not tenant_id):
             for b in sorted(self._memory_bookings.values(), key=lambda x: x.get("created_at", ""), reverse=True):
-                if tenant_id and b.get("tenant_id") and b.get("tenant_id") != tenant_id:
+                if tenant_id and (b.get("tenant_id") != tenant_id and b.get("vendor_id") != tenant_id):
                     continue
                 if status and status.lower() != "all" and b.get("status") != status:
                     continue

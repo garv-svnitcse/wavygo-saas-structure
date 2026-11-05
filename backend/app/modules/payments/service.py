@@ -198,10 +198,10 @@ class PaymentService:
             except Exception:
                 pass
 
-        # Fallback to in-memory store if DB has no records or DB is unreachable
-        if not results:
+        # Fallback to in-memory store if DB is unreachable or for unauthenticated test suites
+        if not results and (db is None or not tenant_id):
             for p in sorted(self._memory_payments.values(), key=lambda x: x.get("created_at", ""), reverse=True):
-                if tenant_id and p.get("tenant_id") and p.get("tenant_id") != tenant_id:
+                if tenant_id and (p.get("tenant_id") != tenant_id and p.get("vendor_id") != tenant_id):
                     continue
                 if booking_id and p.get("booking") != booking_id:
                     continue

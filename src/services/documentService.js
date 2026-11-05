@@ -1,4 +1,4 @@
-import { API_BASE_URL } from './apiClient.js'
+import { apiFetch } from './apiClient.js'
 
 /**
  * Service to interact with the backend Documents API and Cloudinary uploads.
@@ -9,28 +9,10 @@ export const documentService = {
    * @param {FormData} formData Contains file, name, category, scope, etc.
    */
   async uploadDocument(formData) {
-    const url = `${API_BASE_URL}/documents/upload`
-    const response = await fetch(url, {
+    return apiFetch('/documents/upload', {
       method: 'POST',
-      body: formData, // fetch will set multipart/form-data boundary automatically
+      body: formData,
     })
-
-    if (!response.ok) {
-      let errorDetail = `Upload failed with status ${response.status}`
-      try {
-        const errJson = await response.json()
-        if (errJson && errJson.detail) {
-          errorDetail = typeof errJson.detail === 'string'
-            ? errJson.detail
-            : JSON.stringify(errJson.detail)
-        }
-      } catch {
-        // Body not JSON
-      }
-      throw new Error(errorDetail)
-    }
-
-    return response.json()
   },
 
   /**
@@ -46,50 +28,33 @@ export const documentService = {
     if (limit) params.append('limit', String(limit))
 
     const qs = params.toString() ? `?${params.toString()}` : ''
-    const response = await fetch(`${API_BASE_URL}/documents${qs}`)
-    if (!response.ok) {
-      throw new Error(`Failed to fetch documents: ${response.statusText}`)
-    }
-    return response.json()
+    return apiFetch(`/documents${qs}`)
   },
 
   /**
    * Fetch single document by ID
    */
   async getDocument(documentId) {
-    const response = await fetch(`${API_BASE_URL}/documents/${encodeURIComponent(documentId)}`)
-    if (!response.ok) {
-      throw new Error(`Document not found: ${response.statusText}`)
-    }
-    return response.json()
+    return apiFetch(`/documents/${encodeURIComponent(documentId)}`)
   },
 
   /**
    * Update document details or status
    */
   async updateDocument(documentId, updates) {
-    const response = await fetch(`${API_BASE_URL}/documents/${encodeURIComponent(documentId)}`, {
+    return apiFetch(`/documents/${encodeURIComponent(documentId)}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updates),
     })
-    if (!response.ok) {
-      throw new Error(`Failed to update document: ${response.statusText}`)
-    }
-    return response.json()
   },
 
   /**
    * Delete document from DB and Cloudinary
    */
   async deleteDocument(documentId) {
-    const response = await fetch(`${API_BASE_URL}/documents/${encodeURIComponent(documentId)}`, {
+    return apiFetch(`/documents/${encodeURIComponent(documentId)}`, {
       method: 'DELETE',
     })
-    if (!response.ok) {
-      throw new Error(`Failed to delete document: ${response.statusText}`)
-    }
-    return response.json()
   },
 }
 
