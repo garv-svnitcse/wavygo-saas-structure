@@ -17,7 +17,6 @@ import {
   RefreshCw,
   ShieldCheck,
   Trash2,
-  Trash2,
   Upload,
   Users,
   Wallet,
@@ -1734,6 +1733,26 @@ function Staff() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [documentsByStaff, setDocumentsByStaff] = useState({})
+  const [documentTypes, setDocumentTypes] = useState({})
+  const [documentErrors, setDocumentErrors] = useState({})
+  const [previewDocument, setPreviewDocument] = useState(null)
+  const [previewUrl, setPreviewUrl] = useState('')
+
+  useEffect(() => {
+    if (!previewDocument) {
+      setPreviewUrl('')
+      return undefined
+    }
+
+    const url = previewDocument.file instanceof Blob ? URL.createObjectURL(previewDocument.file) : (previewDocument.url || '')
+    setPreviewUrl(url)
+    return () => {
+      if (previewDocument.file instanceof Blob) {
+        URL.revokeObjectURL(url)
+      }
+    }
+  }, [previewDocument])
 
   async function staffRequest(path, options = {}) {
     const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -1765,7 +1784,17 @@ function Staff() {
     setError('')
     try {
       const data = await staffRequest('/staff/')
-      setStaff(Array.isArray(data) ? data : (data.items || []))
+      const items = Array.isArray(data) ? data : (data.items || [])
+      setStaff(items)
+      const docsMap = {}
+      items.forEach((p) => {
+        if (p.documents && Array.isArray(p.documents)) {
+          docsMap[p.id] = p.documents
+        }
+      })
+      if (Object.keys(docsMap).length > 0) {
+        setDocumentsByStaff((prev) => ({ ...docsMap, ...prev }))
+      }
     } catch (requestError) {
       setError(requestError.message || 'Unable to load staff. Please try again.')
     } finally {
@@ -1783,6 +1812,86 @@ function Staff() {
     (tab === 'All' || person.status === tab)
     && `${person.name || ''} ${person.role || ''} ${person.phone || ''}`.toLowerCase().includes(query.toLowerCase()),
   )
+
+  async function uploadDocuments(person, event) {
+    const files = Array.from(event.target.files || [])
+    const acceptedFiles = files.filter((file) => /\.(pdf|jpe?g|png)$/i.test(file.name))
+    const rejectedFiles = files.length - acceptedFiles.length
+
+    if (rejectedFiles) {
+      setDocumentErrors((current) => ({
+        ...current,
+        [person.id]: 'Only PDF, JPG, JPEG, and PNG files are supported.',
+      }))
+    } else {
+      setDocumentErrors((current) => ({ ...current, [person.id]: '' }))
+    }
+
+    if (acceptedFiles.length) {
+      const category = documentTypes[person.id] || 'ID Proof'
+      for (const file of acceptedFiles) {
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('category', category)
+        try {
+          const res = await fetch(`${API_BASE_URL}/staff/${encodeURIComponent(person.id)}/documents`, {
+            method: 'POST',
+            credentials: 'include',
+            body: formData,
+          })
+          if (res.ok) {
+            const uploadedDoc = await res.json()
+            setDocumentsByStaff((current) => ({
+              ...current,
+              [person.id]: [...(current[person.id] || []).filter((d) => d.id !== uploadedDoc.id), { ...uploadedDoc, file }],
+            }))
+            continue
+          }
+        } catch (_) {}
+        setDocumentsByStaff((current) => ({
+          ...current,
+          [person.id]: [
+            ...(current[person.id] || []),
+            {
+              id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              name: file.name,
+              category,
+              file,
+            },
+          ],
+        }))
+      }
+    }
+
+    event.target.value = ''
+  }
+
+  function downloadDocument(document) {
+    const url = document.file instanceof Blob ? URL.createObjectURL(document.file) : (document.url || '')
+    const link = window.document.createElement('a')
+    link.href = url
+    link.download = document.name
+    window.document.body.append(link)
+    link.click()
+    link.remove()
+    if (document.file instanceof Blob) {
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    }
+  }
+
+  async function deleteDocument(personId, documentId) {
+    try {
+      await fetch(`${API_BASE_URL}/staff/${encodeURIComponent(personId)}/documents/${encodeURIComponent(documentId)}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+    } catch (_) {}
+    setDocumentsByStaff((current) => ({
+      ...current,
+      [personId]: (current[personId] || []).filter((item) => item.id !== documentId),
+    }))
+    if (previewDocument?.id === documentId) setPreviewDocument(null)
+  }
 
   async function createStaff(values) {
     setSaving(true)
@@ -1847,6 +1956,57 @@ function Staff() {
           <DataTable rows={filtered} columns={[
             { key: 'name', label: 'Team member', render: (row) => <button type="button" onClick={() => setSelected(row)} className="text-left font-medium text-slate-800 hover:text-emerald-800">{row.name}<span className="mt-1 block text-[11px] font-normal text-slate-400">{row.id}</span></button> },
             { key: 'role', label: 'Role' }, { key: 'phone', label: 'Phone' },
+            { key: 'documents', label: 'Documents', render: (row) => {
+              const documents = documentsByStaff[row.id] || []
+              return (
+                <div className="min-w-[260px] space-y-2.5">
+                  <div className="flex items-center gap-2">
+                    <select
+                      aria-label={`Document type for ${row.name}`}
+                      value={documentTypes[row.id] || 'ID Proof'}
+                      onChange={(event) => setDocumentTypes((current) => ({ ...current, [row.id]: event.target.value }))}
+                      className="h-8 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700"
+                    >
+                      {['Aadhaar Card', 'PAN Card', 'ID Proof', 'Resume', 'Joining Letter', 'Employment Contract', 'Other'].map((type) => <option key={type}>{type}</option>)}
+                    </select>
+                    <label className="inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                      <Upload size={13} aria-hidden="true" />
+                      Upload
+                      <input
+                        type="file"
+                        multiple
+                        accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                        onChange={(event) => uploadDocuments(row, event)}
+                        className="sr-only"
+                      />
+                    </label>
+                  </div>
+                  {documentErrors[row.id] && <p role="alert" className="text-[11px] text-rose-600">{documentErrors[row.id]}</p>}
+                  {documents.length ? (
+                    <div className="space-y-1.5">
+                      {documents.map((document) => (
+                        <div key={document.id} className="flex min-w-0 items-center gap-1.5 text-[11px]">
+                          <FileText size={13} className="shrink-0 text-emerald-700" aria-hidden="true" />
+                          <span className="min-w-0 flex-1 truncate text-slate-700" title={`${document.category}: ${document.name}`}>
+                            <span className="font-medium">{document.category}: </span>{document.name}
+                          </span>
+                          <button type="button" onClick={() => setPreviewDocument(document)} aria-label={`View ${document.name}`} className="font-semibold text-emerald-800 hover:text-emerald-950">View</button>
+                          <button type="button" onClick={() => downloadDocument(document)} aria-label={`Download ${document.name}`} className="font-semibold text-slate-600 hover:text-slate-900">Download</button>
+                          <button
+                            type="button"
+                            onClick={() => deleteDocument(row.id, document.id)}
+                            aria-label={`Delete ${document.name}`}
+                            className="grid size-6 shrink-0 place-items-center rounded text-slate-400 hover:bg-rose-50 hover:text-rose-700"
+                          >
+                            <Trash2 size={13} aria-hidden="true" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <p className="text-[11px] text-slate-400">No documents uploaded</p>}
+                </div>
+              )
+            } },
             { key: 'salary', label: 'Monthly salary', render: (row) => currency(row.salary) },
             { key: 'attendance', label: 'Attendance', render: (row) => row.attendance || 'Not recorded' },
             { key: 'nextSalary', label: 'Next salary', render: (row) => row.nextSalary || '—' },
@@ -1869,6 +2029,15 @@ function Staff() {
         ['Attendance', selected.attendance || 'Not recorded'], ['Next salary', selected.nextSalary || '—'],
         ['Status', selected.status],
       ]} />}
+      {previewDocument && (
+        <Modal title={`${previewDocument.category} · ${previewDocument.name}`} onClose={() => setPreviewDocument(null)}>
+          {previewUrl && (previewDocument.file?.type === 'application/pdf' || /\.pdf$/i.test(previewDocument.name) ? (
+            <iframe title={previewDocument.name} src={previewUrl} className="h-[65vh] w-full rounded-lg border border-slate-200" />
+          ) : (
+            <img src={previewUrl} alt={previewDocument.name} className="max-h-[65vh] w-full rounded-lg object-contain" />
+          ))}
+        </Modal>
+      )}
     </div>
   )
 }

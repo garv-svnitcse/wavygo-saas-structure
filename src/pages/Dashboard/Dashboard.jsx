@@ -24,10 +24,59 @@ import {
   StatusBadge,
 } from '../../components/ui/Workspace.jsx'
 
+function createSampleArrivals(vehicles = [], customers = [], staff = []) {
+  const samples = [
+    { bookingId: 'BK-3985', vehicleId: 'VH-1042', customerId: 'CU-2048', staffId: 'ST-024', minutesFromNow: 35, pickupLocation: 'WavyGo Ahmedabad Hub', returnLocation: 'Ahmedabad Airport' },
+    { bookingId: 'BK-3986', vehicleId: 'VH-1038', customerId: 'CU-2047', staffId: 'ST-023', minutesFromNow: 95, pickupLocation: 'Satellite Road Hub', returnLocation: 'Prahlad Nagar' },
+    { bookingId: 'BK-3987', vehicleId: 'VH-1034', customerId: 'CU-2046', staffId: 'ST-022', minutesFromNow: 180, pickupLocation: 'Navrangpura Hub', returnLocation: 'Ahmedabad Railway Station' },
+  ]
+
+  return samples.map((sample) => ({
+    ...sample,
+    vehicle: vehicles.find((vehicle) => vehicle.id === sample.vehicleId),
+    customer: customers.find((customer) => customer.id === sample.customerId),
+    staff: staff.find((person) => person.id === sample.staffId),
+    expectedAt: Date.now() + sample.minutesFromNow * 60_000,
+    status: 'Upcoming',
+  }))
+}
+
+function formatArrivalCountdown(arrival, now) {
+  if (arrival.status === 'Arrived') return 'Marked as arrived'
+  const difference = arrival.expectedAt - now
+  const minutes = Math.ceil(Math.abs(difference) / 60_000)
+  const hours = Math.floor(minutes / 60)
+  const remainingMinutes = minutes % 60
+  const duration = hours ? `${hours}h ${remainingMinutes}m` : `${remainingMinutes}m`
+  return difference < 0 ? `Delayed by ${duration}` : `In ${duration}`
+}
+
 function Dashboard() {
-  const { bookings = [], vehicles = [], payments = [] } = useDemoData()
+  const { bookings = [], vehicles = [], payments = [], customers = [], staff = [] } = useDemoData()
   const [dateRange, setDateRange] = useState('Last 30 days')
   const [backendStats, setBackendStats] = useState(null)
+  const [arrivalFilter, setArrivalFilter] = useState('All Upcoming')
+  const [arrivals, setArrivals] = useState(() => createSampleArrivals(vehicles, customers, staff))
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 15_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    if (backendStats?.upcoming_arrivals && Array.isArray(backendStats.upcoming_arrivals)) {
+      setArrivals(backendStats.upcoming_arrivals)
+    }
+  }, [backendStats])
+
+  const arrivalWindow = arrivalFilter === 'Next 1 Hour' ? 60 : arrivalFilter === 'Next 2 Hours' ? 120 : null
+  const visibleArrivals = arrivals.filter((arrival) => {
+    if (arrival.status === 'Arrived') return false
+    if (arrivalWindow === null) return true
+    const minutesUntilArrival = (arrival.expectedAt - now) / 60_000
+    return minutesUntilArrival >= 0 && minutesUntilArrival <= arrivalWindow
+  })
 
   useEffect(() => {
     let active = true

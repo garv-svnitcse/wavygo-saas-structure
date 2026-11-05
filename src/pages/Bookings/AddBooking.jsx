@@ -492,6 +492,8 @@ function AddBooking() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="Full name" name="name" value={customer.name} onChange={(value) => updateCustomer('name', value)} error={errors.name} placeholder="e.g. Ramesh Kumar" required />
                   <Field label="Phone number" name="phone" value={customer.phone} onChange={(value) => updateCustomer('phone', value)} error={errors.phone} placeholder="+91 98765 43210" required />
+                  <Field label="Driving Licence Number" name="drivingLicence" value={customer.drivingLicence} onChange={(value) => updateCustomer('drivingLicence', value)} error={errors.drivingLicence} placeholder="Enter licence number" required />
+                  <Field label="Aadhaar Number" name="aadhaar" value={customer.aadhaar} onChange={(value) => updateCustomer('aadhaar', value)} error={errors.aadhaar} placeholder="12-digit Aadhaar number" inputMode="numeric" maxLength={12} required />
                   <div className="sm:col-span-2">
                     <Field label="Email address (optional)" name="email" value={customer.email} onChange={(value) => updateCustomer('email', value)} error={errors.email} placeholder="ramesh@example.com" type="email" />
                   </div>

@@ -33,4 +33,32 @@ def test_get_dashboard_alias():
     assert response.status_code == 200
     data = response.json()
     assert "total_vehicles" in data
+    assert "upcoming_arrivals" in data
+    assert isinstance(data["upcoming_arrivals"], list)
+
+
+def test_get_upcoming_arrivals():
+    response = client.get("/api/v1/dashboard/arrivals")
+    assert response.status_code == 200
+    arrivals = response.json()
+    assert isinstance(arrivals, list)
+    assert len(arrivals) > 0
+    assert "bookingId" in arrivals[0]
+    assert "expectedAt" in arrivals[0]
+
+
+def test_mark_arrival_as_arrived():
+    response = client.patch("/api/v1/dashboard/arrivals/BK-3985/arrive")
+    assert response.status_code == 200
+    res = response.json()
+    assert res["status"] == "Arrived"
+    assert res["booking_id"] == "BK-3985"
+
+    # Verify status reflects in arrivals list
+    list_res = client.get("/api/v1/dashboard/arrivals")
+    assert list_res.status_code == 200
+    item = next((a for a in list_res.json() if a["bookingId"] == "BK-3985"), None)
+    assert item is not None
+    assert item["status"] == "Arrived"
+
 

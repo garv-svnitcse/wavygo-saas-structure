@@ -91,6 +91,17 @@ class FakeStaffCollection:
         for document in self.documents.values():
             if all(document.get(k) == v for k, v in query.items()):
                 document.update(deepcopy(changes.get("$set", {})))
+                if "$push" in changes:
+                    for k, val in changes["$push"].items():
+                        document.setdefault(k, []).append(deepcopy(val))
+                if "$pull" in changes:
+                    for k, val in changes["$pull"].items():
+                        if k in document and isinstance(document[k], list):
+                            if isinstance(val, dict):
+                                document[k] = [
+                                    item for item in document[k]
+                                    if not all(item.get(ik) == iv for ik, iv in val.items())
+                                ]
                 return type("UpdateResult", (), {"matched_count": 1})()
 
         return type("UpdateResult", (), {"matched_count": 0})()
@@ -312,4 +323,54 @@ def test_staff_missing_database_returns_503():
         get_staff_collection(FakeRequest())
 
     assert error.value.status_code == 503
+
+
+def test_staff_document_upload_and_lifecycle(staff_api):
+    client, staff_collection = staff_api
+    create_response = client.post(
+        "/api/v1/staff/",
+        json={
+            "name": "Document Tester",
+            "role": "Operations associate",
+            "phone": "+91 99999 88888",
+            "salary": 32000,
+        },
+    )
+    assert create_response.status_code == 201
+    staff_id = create_response.json()["id"]
+
+    # Test upload valid document
+    file_content = b"%PDF-1.4 mock pdf content"
+    upload_response = client.post(
+        f"/api/v1/staff/{staff_id}/documents",
+        data={"category": "Aadhaar Card"},
+        files={"file": ("aadhaar.pdf", file_content, "application/pdf")},
+    )
+    assert upload_response.status_code == 201
+    doc_data = upload_response.json()
+    assert doc_data["name"] == "aadhaar.pdf"
+    assert doc_data["category"] == "Aadhaar Card"
+    doc_id = doc_data["id"]
+
+    # Test list documents
+    list_response = client.get(f"/api/v1/staff/{staff_id}/documents")
+    assert list_response.status_code == 200
+    items = list_response.json()["items"]
+    assert len(items) == 1
+    assert items[0]["id"] == doc_id
+
+    # Test download document
+    download_response = client.get(f"/api/v1/staff/{staff_id}/documents/{doc_id}/download")
+    assert download_response.status_code == 200
+    assert download_response.content == file_content
+
+    # Test delete document
+    delete_response = client.delete(f"/api/v1/staff/{staff_id}/documents/{doc_id}")
+    assert delete_response.status_code == 200
+
+    # Verify list is empty
+    list_after = client.get(f"/api/v1/staff/{staff_id}/documents")
+    assert list_after.status_code == 200
+    assert len(list_after.json()["items"]) == 0
+
 

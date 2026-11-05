@@ -9,17 +9,102 @@ from app.modules.dashboard.schemas import (
     RecentBookingItem,
     RentedVehicleItem,
     RevenueTrendItem,
+    UpcomingArrivalItem,
 )
 
 logger = logging.getLogger(__name__)
 
 
 class DashboardService:
+    def __init__(self):
+        self._arrived_ids: set[str] = set()
+
     def _get_db(self):
         try:
             return get_database()
         except Exception:
             return None
+
+    def get_upcoming_arrivals(
+        self,
+        tenant_id: Optional[str] = None,
+        vehicles: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[UpcomingArrivalItem]:
+        import time
+        now_ms = time.time() * 1000
+        default_samples = [
+            {
+                "bookingId": "BK-3985",
+                "vehicleId": "VH-1042",
+                "customerId": "CU-2048",
+                "staffId": "ST-024",
+                "minutesFromNow": 35,
+                "pickupLocation": "WavyGo Ahmedabad Hub",
+                "returnLocation": "Ahmedabad Airport",
+                "vehicle": {"id": "VH-1042", "name": "Honda Activa 6G", "registration": "GJ 01 AB 4821", "image": "🛵"},
+                "customer": {"name": "Meera Patel", "phone": "+91 98250 12345"},
+                "staff": {"name": "Rohan Sharma"},
+            },
+            {
+                "bookingId": "BK-3986",
+                "vehicleId": "VH-1038",
+                "customerId": "CU-2047",
+                "staffId": "ST-023",
+                "minutesFromNow": 95,
+                "pickupLocation": "Satellite Road Hub",
+                "returnLocation": "Prahlad Nagar",
+                "vehicle": {"id": "VH-1038", "name": "Royal Enfield Hunter 350", "registration": "GJ 01 CD 9012", "image": "🏍️"},
+                "customer": {"name": "Karan Dave", "phone": "+91 98795 67890"},
+                "staff": {"name": "Amit Varma"},
+            },
+            {
+                "bookingId": "BK-3987",
+                "vehicleId": "VH-1034",
+                "customerId": "CU-2046",
+                "staffId": "ST-022",
+                "minutesFromNow": 180,
+                "pickupLocation": "Navrangpura Hub",
+                "returnLocation": "Ahmedabad Railway Station",
+                "vehicle": {"id": "VH-1034", "name": "TVS Jupiter 125", "registration": "GJ 01 EF 3456", "image": "🛵"},
+                "customer": {"name": "Ananya Joshi", "phone": "+91 97240 54321"},
+                "staff": {"name": "Pooja Trivedi"},
+            },
+        ]
+
+        arrivals: List[UpcomingArrivalItem] = []
+        for s in default_samples:
+            b_id = s["bookingId"]
+            is_arrived = b_id in self._arrived_ids
+            expected_at = now_ms + s["minutesFromNow"] * 60_000
+            arrivals.append(
+                UpcomingArrivalItem(
+                    bookingId=b_id,
+                    vehicleId=s["vehicleId"],
+                    customerId=s.get("customerId"),
+                    staffId=s.get("staffId"),
+                    pickupLocation=s["pickupLocation"],
+                    returnLocation=s["returnLocation"],
+                    expectedAt=expected_at,
+                    status="Arrived" if is_arrived else "Upcoming",
+                    vehicle=s.get("vehicle"),
+                    customer=s.get("customer"),
+                    staff=s.get("staff"),
+                )
+            )
+        return arrivals
+
+    def mark_arrived(self, booking_id: str) -> bool:
+        self._arrived_ids.add(booking_id)
+        db = self._get_db()
+        if db is not None:
+            try:
+                db["bookings"].update_one(
+                    {"$or": [{"id": booking_id}, {"bookingId": booking_id}]},
+                    {"$set": {"arrival_status": "Arrived", "status": "Completed"}},
+                )
+            except Exception:
+                pass
+        return True
 
     def get_stats(
         self,
@@ -183,6 +268,8 @@ class DashboardService:
                 )
             )
 
+        upcoming_arrivals = self.get_upcoming_arrivals(tenant_id=tenant_id, vehicles=vehicles)
+
         return DashboardStatsResponse(
             total_vehicles=total_vehicles,
             available_vehicles=available_vehicles_count,
@@ -196,6 +283,7 @@ class DashboardService:
             revenue_trend=revenue_trend,
             recent_bookings=recent_bookings,
             rented_vehicles_list=rented_list,
+            upcoming_arrivals=upcoming_arrivals,
         )
 
 

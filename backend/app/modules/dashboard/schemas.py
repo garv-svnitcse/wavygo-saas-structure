@@ -32,6 +32,21 @@ class RentedVehicleItem(BaseModel):
     image: Optional[str] = None
 
 
+class UpcomingArrivalItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    bookingId: str
+    vehicleId: str
+    customerId: Optional[str] = None
+    staffId: Optional[str] = None
+    pickupLocation: str = ""
+    returnLocation: str = ""
+    expectedAt: float
+    status: str = "Upcoming"
+    vehicle: Optional[dict] = None
+    customer: Optional[dict] = None
+    staff: Optional[dict] = None
+
+
 class DashboardStatsResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
     total_vehicles: int
@@ -46,4 +61,5 @@ class DashboardStatsResponse(BaseModel):
     revenue_trend: List[RevenueTrendItem]
     recent_bookings: List[RecentBookingItem]
     rented_vehicles_list: List[RentedVehicleItem]
+    upcoming_arrivals: List[UpcomingArrivalItem] = []
 
