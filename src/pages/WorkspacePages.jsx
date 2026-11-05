@@ -17,6 +17,7 @@ import {
   RefreshCw,
   ShieldCheck,
   Trash2,
+  Trash2,
   Upload,
   Users,
   Wallet,

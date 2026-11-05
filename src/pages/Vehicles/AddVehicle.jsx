@@ -37,6 +37,28 @@ const initialData = {
   pickupNotes: '',
 }
 
+function VehicleInput({ label, name, placeholder, type = 'text', required = false, help, data, errors, update, ...props }) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-sm font-semibold text-slate-700">{label}{required && <span className="ml-1 text-rose-500">*</span>}</span>
+      <input type={type} value={data[name]} onChange={(event) => update(name, event.target.value)} placeholder={placeholder} {...props} className={`h-11 w-full rounded-xl border bg-white px-3.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-3 focus:ring-emerald-100 ${errors[name] ? 'border-rose-300' : 'border-slate-200'}`} />
+      {errors[name] ? <span className="mt-1 block text-xs text-rose-600">{errors[name]}</span> : help ? <span className="mt-1 block text-xs text-slate-400">{help}</span> : null}
+    </label>
+  )
+}
+
+function VehicleSelect({ label, name, options, required = false, data, errors, update }) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-sm font-semibold text-slate-700">{label}{required && <span className="ml-1 text-rose-500">*</span>}</span>
+      <select value={data[name]} onChange={(event) => update(name, event.target.value)} className={`h-11 w-full rounded-xl border bg-white px-3.5 text-sm text-slate-700 outline-none transition focus:border-emerald-500 focus:ring-3 focus:ring-emerald-100 ${errors[name] ? 'border-rose-300' : 'border-slate-200'}`}>
+        <option value="">Select {label.toLowerCase()}</option>{options.map((option) => <option key={option}>{option}</option>)}
+      </select>
+      {errors[name] && <span className="mt-1 block text-xs text-rose-600">{errors[name]}</span>}
+    </label>
+  )
+}
+
 function AddVehicle() {
   const navigate = useNavigate()
   const { syncVehicles } = useDemoData()
@@ -130,24 +152,6 @@ function AddVehicle() {
     }
   }
 
-  const Input = ({ label, name, placeholder, type = 'text', required = false, help, ...props }) => (
-    <label className="block">
-      <span className="mb-1.5 block text-sm font-semibold text-slate-700">{label}{required && <span className="ml-1 text-rose-500">*</span>}</span>
-      <input type={type} value={data[name]} onChange={(event) => update(name, event.target.value)} placeholder={placeholder} {...props} className={`h-11 w-full rounded-xl border bg-white px-3.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-3 focus:ring-emerald-100 ${errors[name] ? 'border-rose-300' : 'border-slate-200'}`} />
-      {errors[name] ? <span className="mt-1 block text-xs text-rose-600">{errors[name]}</span> : help ? <span className="mt-1 block text-xs text-slate-400">{help}</span> : null}
-    </label>
-  )
-
-  const Select = ({ label, name, options, required = false }) => (
-    <label className="block">
-      <span className="mb-1.5 block text-sm font-semibold text-slate-700">{label}{required && <span className="ml-1 text-rose-500">*</span>}</span>
-      <select value={data[name]} onChange={(event) => update(name, event.target.value)} className={`h-11 w-full rounded-xl border bg-white px-3.5 text-sm text-slate-700 outline-none transition focus:border-emerald-500 focus:ring-3 focus:ring-emerald-100 ${errors[name] ? 'border-rose-300' : 'border-slate-200'}`}>
-        <option value="">Select {label.toLowerCase()}</option>{options.map((option) => <option key={option}>{option}</option>)}
-      </select>
-      {errors[name] && <span className="mt-1 block text-xs text-rose-600">{errors[name]}</span>}
-    </label>
-  )
-
   return (
     <section className="mx-auto max-w-4xl space-y-5 pb-8 text-slate-800">
       <button type="button" onClick={() => navigate('/app/vehicles')} className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-emerald-800"><ArrowLeft size={16} /> Back to vehicles</button>
@@ -163,12 +167,12 @@ function AddVehicle() {
 
         {step === 0 && <div className="animate-in space-y-5">
           <div className="mb-1"><h2 className="text-lg font-semibold text-slate-900">Basic details</h2><p className="mt-1 text-sm text-slate-500">Tell us about the vehicle you’re adding to your fleet.</p></div>
-          <div className="grid gap-4 sm:grid-cols-2"><Input label="Make & model" name="makeModel" placeholder="e.g. Royal Enfield Classic 350" required /><Input label="Variant / trim" name="trim" placeholder="e.g. Classic Chrome" /><Input label="Registration number" name="registration" placeholder="e.g. GJ 05 AB 4821" required /><Input label="Model year" name="year" type="number" min="2000" max="2030" required /><Select label="Vehicle type" name="type" options={['Motorcycle', 'Scooter', 'Electric']} required /><Select label="Fuel type" name="fuel" options={['Petrol', 'Diesel', 'Electric']} required /><Input label="Color" name="color" placeholder="e.g. Forest green" /><Input label="Engine capacity (cc)" name="engineCapacity" type="number" min="0" placeholder="e.g. 350" /><Select label="Transmission" name="transmission" options={['Automatic', 'Manual']} required /><Select label="RC status" name="rcStatus" options={['Pending review', 'Verified']} required /><Select label="Seating capacity" name="seats" options={['1', '2']} /></div>
+          <div className="grid gap-4 sm:grid-cols-2"><VehicleInput data={data} errors={errors} update={update} label="Make & model" name="makeModel" placeholder="e.g. Royal Enfield Classic 350" required /><VehicleInput data={data} errors={errors} update={update} label="Variant / trim" name="trim" placeholder="e.g. Classic Chrome" /><VehicleInput data={data} errors={errors} update={update} label="Registration number" name="registration" placeholder="e.g. GJ 05 AB 4821" required /><VehicleInput data={data} errors={errors} update={update} label="Model year" name="year" type="number" min="2000" max="2030" required /><VehicleSelect data={data} errors={errors} update={update} label="Vehicle type" name="type" options={['Motorcycle', 'Scooter', 'Electric']} required /><VehicleSelect data={data} errors={errors} update={update} label="Fuel type" name="fuel" options={['Petrol', 'Diesel', 'Electric']} required /><VehicleInput data={data} errors={errors} update={update} label="Color" name="color" placeholder="e.g. Forest green" /><VehicleInput data={data} errors={errors} update={update} label="Engine capacity (cc)" name="engineCapacity" type="number" min="0" placeholder="e.g. 350" /><VehicleSelect data={data} errors={errors} update={update} label="Transmission" name="transmission" options={['Automatic', 'Manual']} required /><VehicleSelect data={data} errors={errors} update={update} label="RC status" name="rcStatus" options={['Pending review', 'Verified']} required /><VehicleSelect data={data} errors={errors} update={update} label="Seating capacity" name="seats" options={['1', '2']} /></div>
         </div>}
 
         {step === 1 && <div className="space-y-5">
           <div className="mb-1"><h2 className="text-lg font-semibold text-slate-900">Pricing & availability</h2><p className="mt-1 text-sm text-slate-500">Set the daily rate and where guests can collect this vehicle.</p></div>
-          <div className="grid gap-4 sm:grid-cols-2"><Input label="Daily rental rate" name="rate" type="number" min="1" placeholder="e.g. 2,500" required help="Your demo rate is shown in Indian rupees per day." /><Input label="Minimum rental period" name="minimumDays" type="number" min="1" required help="How many days a booking must be for." /><Input label="Pickup location" name="location" placeholder="e.g. Indiranagar, Bengaluru" required /><label className="block sm:col-span-2"><span className="mb-1.5 block text-sm font-semibold text-slate-700">Pickup instructions <span className="font-normal text-slate-400">(optional)</span></span><textarea value={data.pickupNotes} onChange={(event) => update('pickupNotes', event.target.value)} rows="3" placeholder="Share a helpful note for your renter…" className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:border-emerald-500 focus:ring-3 focus:ring-emerald-100" /></label></div>
+          <div className="grid gap-4 sm:grid-cols-2"><VehicleInput data={data} errors={errors} update={update} label="Daily rental rate" name="rate" type="number" min="1" placeholder="e.g. 2,500" required help="Your demo rate is shown in Indian rupees per day." /><VehicleInput data={data} errors={errors} update={update} label="Minimum rental period" name="minimumDays" type="number" min="1" required help="How many days a booking must be for." /><VehicleInput data={data} errors={errors} update={update} label="Pickup location" name="location" placeholder="e.g. Indiranagar, Bengaluru" required /><label className="block sm:col-span-2"><span className="mb-1.5 block text-sm font-semibold text-slate-700">Pickup instructions <span className="font-normal text-slate-400">(optional)</span></span><textarea value={data.pickupNotes} onChange={(event) => update('pickupNotes', event.target.value)} rows="3" placeholder="Share a helpful note for your renter…" className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:border-emerald-500 focus:ring-3 focus:ring-emerald-100" /></label></div>
           <div className="flex gap-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-4"><IndianRupee size={18} className="mt-0.5 shrink-0 text-emerald-700" /><p className="text-xs leading-5 text-emerald-900/75"><span className="font-semibold">Manual pickup location.</span> Map selection is unavailable because no map configuration is present. Location details are not saved until a vehicle API is connected.</p></div>
         </div>}
 

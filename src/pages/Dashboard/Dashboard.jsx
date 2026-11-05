@@ -303,6 +303,87 @@ function Dashboard() {
           </div>
         </Card>
       </div>
+
+      <Card className="mt-4 overflow-hidden p-5 sm:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Upcoming Bikes / Vehicles</h2>
+            <p className="mt-1 text-xs text-slate-500">Illustrative arrival schedule · local demo records</p>
+          </div>
+          <FilterSelect
+            label="Show"
+            value={arrivalFilter}
+            onChange={setArrivalFilter}
+            options={['Next 1 Hour', 'Next 2 Hours', 'All Upcoming']}
+          />
+        </div>
+        <div className="mt-4 space-y-3">
+          {visibleArrivals.map((arrival) => {
+            const status = arrival.status === 'Arrived'
+              ? 'Arrived'
+              : arrival.expectedAt < now ? 'Delayed' : 'Upcoming'
+            return (
+              <article key={arrival.bookingId} className="rounded-xl border border-slate-100 p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-xl">
+                      {arrival.vehicle?.image || '🏍️'}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-900">{arrival.vehicle?.name || 'Sample vehicle'}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Vehicle ID {arrival.vehicle?.id || arrival.vehicleId} · {arrival.vehicle?.registration || 'Registration not available'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 sm:justify-end">
+                    <StatusBadge status={status} />
+                    <span className="text-xs font-medium text-slate-600">{formatArrivalCountdown(arrival, now)}</span>
+                    <Button
+                      type="button"
+                      variant={status === 'Arrived' ? 'secondary' : 'quiet'}
+                      className="min-h-8 px-2.5 text-xs"
+                      disabled={status === 'Arrived'}
+                      onClick={() => setArrivals((current) => current.map((item) =>
+                        item.bookingId === arrival.bookingId ? { ...item, status: 'Arrived' } : item,
+                      ))}
+                    >
+                      {status === 'Arrived' ? 'Arrived' : 'Mark as Arrived'}
+                    </Button>
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-x-5 gap-y-2 border-t border-slate-100 pt-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                  <p><span className="text-slate-400">Booking ID</span><span className="ml-1.5 font-medium text-slate-700">{arrival.bookingId}</span></p>
+                  <p><span className="text-slate-400">Customer</span><span className="ml-1.5 font-medium text-slate-700">{arrival.customer?.name || 'Not available'}</span></p>
+                  <p><span className="text-slate-400">Contact</span><span className="ml-1.5 font-medium text-slate-700">{arrival.customer?.phone || 'Not available'}</span></p>
+                  <p><span className="text-slate-400">Expected arrival</span><span className="ml-1.5 font-medium text-slate-700">{new Date(arrival.expectedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span></p>
+                  <p><span className="text-slate-400">Pickup location</span><span className="ml-1.5 font-medium text-slate-700">{arrival.pickupLocation}</span></p>
+                  <p><span className="text-slate-400">Return location</span><span className="ml-1.5 font-medium text-slate-700">{arrival.returnLocation}</span></p>
+                  <p><span className="text-slate-400">Assigned staff</span><span className="ml-1.5 font-medium text-slate-700">{arrival.staff?.name || 'Not assigned'}</span></p>
+                </div>
+              </article>
+            )
+          })}
+          {visibleArrivals.length === 0 && (
+            <p className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-xs text-slate-500">
+              No vehicles are expected within this time window.
+            </p>
+          )}
+          {arrivalFilter === 'All Upcoming' && arrivals.some((arrival) => arrival.status === 'Arrived') && (
+            <div className="space-y-2 border-t border-slate-100 pt-3">
+              <p className="text-xs font-semibold text-slate-700">Arrived this session</p>
+              {arrivals.filter((arrival) => arrival.status === 'Arrived').map((arrival) => (
+                <div key={arrival.bookingId} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-emerald-50/60 px-3 py-2">
+                  <p className="text-xs font-medium text-slate-700">
+                    {arrival.vehicle?.name || 'Sample vehicle'} · {arrival.bookingId}
+                  </p>
+                  <StatusBadge status="Arrived" />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </Card>
     </div>
   )
 }
