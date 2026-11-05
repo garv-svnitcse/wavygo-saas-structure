@@ -5,7 +5,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, NoReturn
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
@@ -71,7 +71,9 @@ def get_staff_collection(request: Request) -> Collection:
     return database["staff_members"]
 
 
-def serialize_staff(document: dict[str, Any]) -> dict[str, Any]:
+def serialize_staff(document: dict[str, Any] | None) -> dict[str, Any]:
+    if not document:
+        return {}
     result = dict(document)
     result["id"] = str(result.pop("_id"))
     result.pop("tenant_id", None)
@@ -87,7 +89,7 @@ def parse_staff_id(staff_id: str) -> ObjectId:
     return ObjectId(staff_id)
 
 
-def storage_error() -> None:
+def storage_error() -> NoReturn:
     logger.exception("Staff database operation failed.")
     raise HTTPException(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -159,6 +161,8 @@ def update_staff_status(
             raise HTTPException(status_code=404, detail="Staff member not found.")
 
         document = collection.find_one(query)
+        if not document:
+            raise HTTPException(status_code=404, detail="Staff member not found.")
         return serialize_staff(document)
     except PyMongoError:
         storage_error()
@@ -185,6 +189,8 @@ def update_staff(
             raise HTTPException(status_code=404, detail="Staff member not found.")
 
         document = collection.find_one(query)
+        if not document:
+            raise HTTPException(status_code=404, detail="Staff member not found.")
         return serialize_staff(document)
     except PyMongoError:
         storage_error()
@@ -196,10 +202,10 @@ DOCUMENTS_UPLOAD_DIR = Path("backend/uploads/staff_documents")
 @router.post("/{staff_id}/documents", status_code=status.HTTP_201_CREATED, summary="Upload staff document")
 async def upload_staff_document(
     staff_id: str,
+    vendor: Annotated[dict[str, Any], Depends(get_current_vendor)],
+    collection: Annotated[Collection, Depends(get_staff_collection)],
     file: UploadFile = File(...),
     category: str = Form("ID Proof"),
-    vendor: Annotated[dict[str, Any], Depends(get_current_vendor)] = None,
-    collection: Annotated[Collection, Depends(get_staff_collection)] = None,
 ) -> dict[str, Any]:
     object_id = parse_staff_id(staff_id)
     query = {"_id": object_id, "tenant_id": vendor["_id"]}
