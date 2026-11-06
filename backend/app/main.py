@@ -57,3 +57,5 @@ def health_check() -> dict[str, str]:
 
 
 app.include_router(api_router, prefix="/api/v1")
+# Also mount at root so requests without /api/v1 prefix work seamlessly
+app.include_router(api_router)
